@@ -4,6 +4,7 @@ const jevComments = (() => {
   const COMMENT = ".comment-item, .comment-item-sub";
   const REPLY_LIST = ".reply-container, .sub-comment-list";
   const BODY = ".content, .note-text, .comment-content";
+  const HIDDEN_CLASS = "jev-rednote-hidden";
 
   function text(element) {
     return element?.textContent.replace(/\s+/g, " ").trim() ?? "";
@@ -33,12 +34,24 @@ const jevComments = (() => {
     return Array.from(item.querySelectorAll(selector)).find(el => el.closest(COMMENT) === item);
   }
 
+  function hideTarget({ item, thread, isReply }) {
+    if (item.querySelector(`${COMMENT}, ${REPLY_LIST}, .show-more, .reply-more`)) return null;
+    if (!isReply && item.parentElement === thread && thread.childElementCount === 1) {
+      return thread;
+    }
+    return item;
+  }
+
   function read(list) {
     const comments = [];
     const byItem = new Map();
     const threads = new Map();
     for (const item of list.querySelectorAll(COMMENT)) {
-      if (!item.getClientRects().length) continue;
+      if (!item.getClientRects().length) {
+        const hiddenByExtension = item.classList.contains(HIDDEN_CLASS) ||
+          item.parentElement.matches(`.parent-comment.${HIDDEN_CLASS}`);
+        if (!hiddenByExtension || item.closest("[hidden]")) continue;
+      }
       const body = own(item, BODY);
       const comment = text(body);
       if (!comment || body.querySelector(COMMENT)) continue;
@@ -77,5 +90,5 @@ const jevComments = (() => {
     return comments;
   }
 
-  return { note, read };
+  return { note, read, hideTarget, HIDDEN_CLASS };
 })();

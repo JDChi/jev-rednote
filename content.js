@@ -1,5 +1,6 @@
 (() => {
   const LOG_PREFIX = "[Jev 评论过滤]";
+  const { HIDDEN_CLASS } = jevComments;
   const LABELS = {
     promotion: { folded: "推广引流", suspected: "疑似推广" },
     diandianRequest: { folded: "点点互动请求", suspected: "疑似点点互动请求" }
@@ -24,8 +25,10 @@
   let port;
   let enabled = false;
   let configured = false;
+  let hideMatchedComments = false;
   let connected = false;
   let hasScanned = false;
+  let lastHiddenCount;
   let timer;
   let status;
   let errorCode;
@@ -46,9 +49,10 @@
   }
 
   function removeTreatment(body, treatment) {
+    treatment.hiddenTarget?.classList.remove(HIDDEN_CLASS);
     body.classList.remove("jev-rednote-folded");
     if (treatment.generatedId && body.id === treatment.generatedId) body.removeAttribute("id");
-    treatment.control.remove();
+    treatment.control?.remove();
     rendered.delete(body);
   }
 
@@ -58,6 +62,8 @@
     status = undefined;
     errorCode = undefined;
     hasScanned = false;
+    if (!enabled) reportHiddenCount();
+    lastHiddenCount = undefined;
     noteKey = key;
     entries = new Map();
     requests = new Map();
@@ -77,20 +83,64 @@
         reasons.push(labels.suspected);
       }
     }
-    return { folded, reason: reasons.join("、") };
+    return { folded, reason: reasons.join("、"), scores };
+  }
+
+  function logTreatment(entry, action) {
+    if (entry.action === action) return;
+    const event = entry.action ? "显示方式已更新" : "分析完成";
+    const { promotion, diandianRequest } = entry.decision.scores;
+    console.info(LOG_PREFIX,
+      `评论 #${entry.id} ${event} · ${action} · 推广 ${promotion} · 点点 ${diandianRequest}`);
+    entry.action = action;
+  }
+
+  function reportHiddenCount() {
+    const tracking = enabled && hideMatchedComments;
+    if (!tracking && lastHiddenCount === undefined) return;
+
+    let count = 0;
+    if (tracking) {
+      for (const { hiddenTarget } of rendered.values()) {
+        if (hiddenTarget?.isConnected && hiddenTarget.classList.contains(HIDDEN_CLASS) &&
+            getComputedStyle(hiddenTarget).display === "none") count += 1;
+      }
+    }
+    if (count !== lastHiddenCount) {
+      console.info(LOG_PREFIX, `当前笔记整条隐藏 ${count} 条评论。`);
+    }
+    lastHiddenCount = tracking ? count : undefined;
   }
 
   function applyTreatment(row, entry) {
     const { body } = row;
+    const { decision } = entry;
+    const hiddenTarget = decision?.folded && hideMatchedComments ? jevComments.hideTarget(row) : null;
+    if (decision) {
+      const action = decision.folded ? (hiddenTarget ? "隐藏" : "折叠") : decision.reason ? "标记" : "保留";
+      logTreatment(entry, action);
+    }
     const previous = rendered.get(body);
-    if (previous?.entry === entry && previous.control.parentElement === body.parentElement) {
-      body.classList.toggle("jev-rednote-folded", previous.control.getAttribute("aria-expanded") === "false");
-      return;
+    if (previous?.entry === entry) {
+      if (hiddenTarget && previous.hiddenTarget === hiddenTarget) {
+        hiddenTarget.classList.toggle(HIDDEN_CLASS, true);
+        return;
+      }
+      if (!hiddenTarget && previous.control?.parentElement === body.parentElement) {
+        body.classList.toggle("jev-rednote-folded", previous.control.getAttribute("aria-expanded") === "false");
+        return;
+      }
     }
     if (previous) removeTreatment(body, previous);
-    if (!entry.decision?.reason) return;
+    if (!decision?.reason) return;
 
-    const { folded, reason } = entry.decision;
+    if (hiddenTarget) {
+      hiddenTarget.classList.add(HIDDEN_CLASS);
+      rendered.set(body, { entry, hiddenTarget });
+      return;
+    }
+
+    const { folded, reason } = decision;
     const control = document.createElement(folded ? "button" : "span");
     control.className = folded ? "jev-rednote-toggle" : "jev-rednote-label";
     const treatment = { entry, control };
@@ -136,20 +186,26 @@
     if (!note.list) {
       for (const [body, treatment] of rendered) removeTreatment(body, treatment);
       status?.remove();
+      lastHiddenCount = undefined;
       return;
     }
 
-    const rows = jevComments.read(note.list);
-    const currentBodies = new Set();
-    let queued = 0;
-    for (const row of rows) {
+    const rows = jevComments.read(note.list).filter(row => {
       const previous = lastSeen.get(row.item);
       // The site can update the URL before removing the previous note's DOM.
       if (previous && previous.note !== note.key && previous.key === row.key &&
-          previous.comment === row.comment) continue;
+          previous.comment === row.comment) return false;
       lastSeen.set(row.item, { note: note.key, key: row.key, comment: row.comment });
-      currentBodies.add(row.body);
+      return true;
+    });
+    const currentBodies = new Set(rows.map(row => row.body));
+    // Remove old treatments before a replacement row can reuse their hidden wrapper.
+    for (const [body, treatment] of rendered) {
+      if (!currentBodies.has(body)) removeTreatment(body, treatment);
+    }
 
+    let queued = 0;
+    for (const row of rows) {
       let entry = entries.get(row.key);
       if (!entry && connected && configured) {
         entry = { id: ++requestId, comment: row.comment };
@@ -169,18 +225,23 @@
         removeTreatment(row.body, rendered.get(row.body));
       }
     }
-    for (const [body, treatment] of rendered) {
-      if (!currentBodies.has(body)) removeTreatment(body, treatment);
-    }
     if (!hasScanned || queued > 0) {
       console.info(LOG_PREFIX, `读取到 ${rows.length} 条文字评论，本次提交 ${queued} 条分析。`);
       hasScanned = true;
     }
     showStatus(note.list);
+    reportHiddenCount();
   }
 
   function onSettings(message) {
+    const firstMessage = !connected;
     connected = true;
+    hideMatchedComments = message.hideMatchedComments === true;
+    // A display-only change must not send a view message, which cancels queued requests.
+    if (!firstMessage && !message.reset) {
+      scheduleScan();
+      return;
+    }
     enabled = message.enabled;
     configured = message.configured;
     if (!enabled) {
@@ -222,13 +283,7 @@
       const entry = requests.get(message.id);
       if (!entry) return;
       requests.delete(message.id);
-      if (message.scores) {
-        const { promotion, diandianRequest } = message.scores;
-        entry.decision = decideTreatment(message.scores);
-        const action = entry.decision.folded ? "折叠" : entry.decision.reason ? "标记" : "保留";
-        console.info(LOG_PREFIX,
-          `评论 #${message.id} 分析完成 · ${action} · 推广 ${promotion} · 点点 ${diandianRequest}`);
-      }
+      if (message.scores) entry.decision = decideTreatment(message.scores);
       if (ERRORS[message.error] && errorCode !== message.error) {
         errorCode = message.error;
         console.warn(LOG_PREFIX, ERRORS[errorCode]);

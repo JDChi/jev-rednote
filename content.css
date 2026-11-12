@@ -1,4 +1,5 @@
-.jev-rednote-folded {
+.jev-rednote-folded,
+.jev-rednote-hidden {
   display: none !important;
 }
 

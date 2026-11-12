@@ -1,6 +1,7 @@
 const form = document.querySelector("#settings");
 const apiKey = document.querySelector("#api-key");
 const enabled = document.querySelector("#enabled");
+const hideMatchedComments = document.querySelector("#hide-matched-comments");
 const save = form.querySelector("button");
 const feedback = document.querySelector("#feedback");
 
@@ -15,7 +16,8 @@ async function loadSettings() {
     const { settings = {} } = await chrome.storage.local.get("settings");
     apiKey.value = settings.apiKey ?? "";
     enabled.checked = settings.enabled === true;
-    apiKey.disabled = enabled.disabled = save.disabled = false;
+    hideMatchedComments.checked = settings.hideMatchedComments === true;
+    apiKey.disabled = enabled.disabled = hideMatchedComments.disabled = save.disabled = false;
   } catch {
     setFeedback("无法读取扩展设置。请刷新页面重试。", true);
   }
@@ -28,7 +30,11 @@ form.addEventListener("input", () => {
 
 form.addEventListener("submit", async event => {
   event.preventDefault();
-  const settings = { apiKey: apiKey.value.trim(), enabled: enabled.checked };
+  const settings = {
+    apiKey: apiKey.value.trim(),
+    enabled: enabled.checked,
+    hideMatchedComments: hideMatchedComments.checked
+  };
   if (settings.enabled && !settings.apiKey) {
     apiKey.setAttribute("aria-invalid", "true");
     setFeedback("请输入 TypeSafe API Key 后再开启。", true);

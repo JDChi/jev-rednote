@@ -29,6 +29,7 @@ function sendSettings(client, reset = false) {
     type: "settings",
     enabled: settings.enabled === true,
     configured: Boolean(settings.apiKey),
+    hideMatchedComments: settings.hideMatchedComments === true,
     reset
   });
 }
@@ -49,14 +50,20 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "local" || !changes.settings) return;
   void ready.then(() => {
     const updated = changes.settings.newValue ?? {};
-    if (settings.enabled === updated.enabled && settings.apiKey === updated.apiKey) return;
+    const reset = settings.enabled !== updated.enabled || settings.apiKey !== updated.apiKey;
+    const displayChanged = (settings.hideMatchedComments === true) !== (updated.hideMatchedComments === true);
+    if (!reset && !displayChanged) return;
     settings = updated;
-    authFailed = false;
-    limitedUntil = 0;
+    if (reset) {
+      authFailed = false;
+      limitedUntil = 0;
+    }
     for (const client of clients) {
-      cancelJobs(client);
-      client.view = null;
-      sendSettings(client, true);
+      if (reset) {
+        cancelJobs(client);
+        client.view = null;
+      }
+      sendSettings(client, reset);
     }
   });
 });

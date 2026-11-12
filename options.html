@@ -26,6 +26,13 @@
           </label>
           <p id="sharing">开启后，扩展会将已加载的评论文字、笔记标题和可用的上级评论发送给 TypeSafe。调用会计入你的 API 用量。</p>
         </div>
+        <div class="field">
+          <label class="checkbox">
+            <input id="hide-matched-comments" type="checkbox" aria-describedby="hide-help" disabled>
+            隐藏整条命中评论
+          </label>
+          <p id="hide-help">自动分析时，高分命中的评论会整条隐藏，其他回复仍可查看。关闭后恢复为可展开的正文折叠。</p>
+        </div>
         <div class="actions">
           <button type="submit" disabled>保存设置</button>
           <p id="feedback" role="status"></p>
