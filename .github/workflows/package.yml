@@ -1,0 +1,33 @@
+name: Package Chrome extension
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Run unit tests
+        run: node --test tests/jev.test.mjs
+      - name: Build extension ZIP
+        id: build
+        run: |
+          archive="$(python3 scripts/package.py --tag "$GITHUB_REF_NAME")"
+          printf 'path=%s\n' "$archive" >> "$GITHUB_OUTPUT"
+      - name: Upload extension ZIP
+        uses: actions/upload-artifact@v7
+        with:
+          path: ${{ steps.build.outputs.path }}
+          archive: false
+          if-no-files-found: error

@@ -11,6 +11,12 @@ Chrome Manifest V3 扩展。打开小红书网页版笔记时，用 Jev 识别�
 
 [创建 TypeSafe API Key](https://console.typesafe.ai/settings/keys)
 
+## 打包
+
+本地运行 `python3 scripts/package.py`，ZIP 会生成在 `dist/`。解压后，在扩展管理页选择包含 `manifest.json` 的目录。
+
+更新 `manifest.json` 的版本并提交，再给该提交打上对应的 tag 并推送。例如，版本为 `0.1.0` 时推送 `v0.1.0`。GitHub Actions 会运行单元测试、校验 tag 版本并打包，完成后可在该次运行的 Artifacts 区下载 ZIP。
+
 ## 使用
 
 - 命中分数 ≥ `0.95` 时折叠评论正文，点「展开」可恢复阅读。回复照常显示。
