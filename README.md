@@ -1,35 +1,46 @@
-# 小红书评论过滤 · Jev
+<p align="center">
+  <img src="icons/icon-128.png" width="72" height="72" alt="小红书评论过滤扩展图标">
+</p>
 
-Chrome Manifest V3 扩展。打开小红书网页版笔记时，用 Jev 识别评论中的推广引流和点点互动请求，包括让点点总结笔记、推荐同类内容、查资料或解答问题。
+<h1 align="center">小红书评论过滤 · Jev</h1>
 
-## 安装
+<p align="center">打开小红书网页版笔记后，自动识别评论里的推广引流和 @点点 请求。高分评论可以折叠，也可以整条隐藏。</p>
 
-1. 在 Chrome 打开 `chrome://extensions`，开启「开发者模式」。
-2. 点击「加载已解压的扩展程序」，选择包含 `manifest.json` 的项目目录。
-3. 点击工具栏中的扩展图标，打开设置。填入自己的 TypeSafe API Key，勾选「打开笔记时自动分析评论」并保存。
-4. 打开小红书网页版笔记。安装前已打开的小红书标签页需要刷新一次。
+<p align="center">
+  <a href="https://github.com/JDChi/jev-rednote/actions/workflows/package.yml"><strong>下载扩展</strong></a>
+  ·
+  <a href="#安装与配置">安装与配置</a>
+</p>
 
-[创建 TypeSafe API Key](https://console.typesafe.ai/settings/keys)
+## 效果展示
 
-## 打包
+<p align="center"><strong>左图 · 评论与回复展开时</strong>　｜　<strong>右图 · 整串折叠后</strong></p>
 
-本地运行 `python3 scripts/package.py`，ZIP 会生成在 `dist/`。解压后，在扩展管理页选择包含 `manifest.json` 的目录。
+<p align="center">
+  <a href="docs/images/comments-expanded.png"><img src="docs/images/comments-expanded.png" width="48%" align="top" alt="展开的点点互动请求及下方的点点回复"></a>
+  <a href="docs/images/comments-folded.png"><img src="docs/images/comments-folded.png" width="48%" align="top" alt="折叠后只显示主评论信息和展开按钮，回复已收起"></a>
+</p>
 
-更新 `manifest.json` 的版本并提交，再给该提交打上对应的 tag 并推送。例如，版本为 `0.1.0` 时推送 `v0.1.0`。GitHub Actions 会运行单元测试、校验 tag 版本并打包，完成后可在该次运行的 Artifacts 区下载 ZIP。
+## 功能
 
-## 使用
+- **默认折叠。** 高分命中的评论会折叠正文。主评论折叠时会一并收起整串回复，点「展开」即可查看。
+- **整条隐藏。** 在扩展设置里开启「隐藏整条命中评论」，高分命中的评论会从列表中隐藏，独立的楼中楼回复仍可查看。
+- **疑似标签。** 可疑评论保留原文，并标为「疑似推广」或「疑似点点互动请求」。
 
-- 命中分数 ≥ `0.95` 时默认折叠评论正文，点「展开」可恢复阅读。在扩展设置中勾选「隐藏整条命中评论」并保存，高分命中的评论会整条隐藏，独立的楼中楼回复仍可查看。关闭该选项可恢复正文折叠。
-- 命中分数 ≥ `0.75` 且低于 `0.95` 时显示「疑似」标签。两个分数是第一版的初始阈值。
-- 扩展随页面读取已经加载的文字评论。滚动或手动展开回复后，新出现的评论也会分析。每次打开一篇笔记，同一条评论只分析一次。关闭设置中的开关可恢复当前页面。
-- 开启后，扩展把评论正文、笔记标题和能识别出的直接上级评论正文发送给 TypeSafe。Key 存在本机的扩展存储中。分析会计入 TypeSafe API 用量。
+## 安装与配置
 
-## 查看处理日志
+1. 登录 GitHub，在 [自动打包页面](https://github.com/JDChi/jev-rednote/actions/workflows/package.yml) 打开最近一次成功的运行，从 **Artifacts** 下载扩展 ZIP。也可以 [下载 main 源码 ZIP](https://github.com/JDChi/jev-rednote/archive/refs/heads/main.zip)。
+2. 解压 ZIP，在 Chrome 打开 `chrome://extensions`，开启「开发者模式」，点「加载已解压的扩展程序」，选择包含 `manifest.json` 的目录。
+3. 按 [TypeSafe 快速入门](https://docs.typesafe.ai/introduction/quickstart) 创建 API Key。点击工具栏中的扩展图标，填入 Key，勾选「打开笔记时自动分析评论」并保存。
+4. 打开一篇小红书网页版笔记。安装时已经打开的笔记需要刷新一次。滚动加载评论或手动展开回复后，新出现的评论也会自动分析。
 
-在小红书笔记标签页打开开发者工具的 Console，筛选 `Jev 评论过滤`。日志会显示自动分析状态、每批提交数量、每条评论的两项分数及隐藏、折叠、标记或保留结果。开启整条隐藏时，日志还会在数量变化后显示当前笔记实际隐藏了多少条评论。请求失败时会显示对应提示。日志仅记录处理状态、数量、临时编号和分数。
+## 工作原理
 
-## 验证
+```mermaid
+flowchart TD
+    A["小红书加载评论"] --> B["扩展读取网页里的文字"]
+    B --> C["TypeSafe Jev 判断推广和点点请求"]
+    C --> D["浏览器标记、折叠或隐藏"]
+```
 
-- `node --test tests/jev.test.mjs` 检查请求格式、返回值校验、鉴权失败、限流、超时和取消。
-- 安装 Playwright 和它的 Chromium 后运行 `node tests/chrome.mjs`。测试用独立浏览器配置，模拟网页和 Jev 响应，覆盖自动分析、折叠、回复加载、切换笔记与关闭开关。
-- 在终端配置 `TYPESAFE_API_KEY` 后运行 `node tests/evaluate.mjs`，逐条分析 [人工标注的中文样本](tests/samples.json)，并输出分数、处理结果和误判。每条样本发出一次 API 请求。
+开启自动分析后，扩展会把评论正文、笔记标题和能识别出的直接上级评论正文发送给 TypeSafe。API Key 保存在本机的扩展设置中，分析会计入 TypeSafe API 用量。
