@@ -1,0 +1,75 @@
+.jev-rednote-folded {
+  display: none !important;
+}
+
+.jev-rednote-toggle,
+.jev-rednote-label,
+.jev-rednote-status {
+  box-sizing: border-box;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.jev-rednote-toggle,
+.jev-rednote-label {
+  display: inline-block;
+  max-width: 100%;
+  margin: 2px 0;
+  padding: 4px 8px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+}
+
+.jev-rednote-toggle {
+  min-height: 32px;
+  color: #3d454c;
+  background: #f2f4f6;
+  border-color: #d8dee4;
+  text-align: start;
+  cursor: pointer;
+}
+
+.jev-rednote-toggle:hover {
+  background: #e6eaee;
+}
+
+.jev-rednote-toggle:focus-visible {
+  outline: 2px solid #08746d;
+  outline-offset: 2px;
+}
+
+.jev-rednote-label,
+.jev-rednote-status {
+  color: #744409;
+  background: #fff4d8;
+}
+
+.jev-rednote-status {
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  border-radius: 5px;
+}
+
+@media (prefers-color-scheme: dark) {
+  .jev-rednote-toggle {
+    color: #e1e7ed;
+    background: #2d343b;
+    border-color: #505d69;
+  }
+
+  .jev-rednote-toggle:hover {
+    background: #3a444d;
+  }
+
+  .jev-rednote-toggle:focus-visible {
+    outline-color: #71d8cb;
+  }
+
+  .jev-rednote-label,
+  .jev-rednote-status {
+    color: #ffdc98;
+    background: #402d13;
+  }
+}

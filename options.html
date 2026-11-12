@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>小红书评论过滤设置</title>
+    <link rel="stylesheet" href="options.css">
+    <script src="options.js" defer></script>
+  </head>
+  <body>
+    <main>
+      <h1>小红书评论过滤</h1>
+      <p class="intro">使用 Jev 识别评论里的推广引流和点点互动请求。</p>
+      <form id="settings">
+        <div class="field">
+          <label for="api-key">TypeSafe API Key</label>
+          <input id="api-key" type="password" spellcheck="false" autocapitalize="off"
+                 aria-describedby="key-help feedback" disabled>
+          <p id="key-help">Key 保存在这台电脑的扩展设置中。<a href="https://console.typesafe.ai/settings/keys"
+             target="_blank" rel="noopener">在 TypeSafe 创建 Key</a></p>
+        </div>
+        <div class="field">
+          <label class="checkbox">
+            <input id="enabled" type="checkbox" aria-describedby="sharing" disabled>
+            打开笔记时自动分析评论
+          </label>
+          <p id="sharing">开启后，扩展会将已加载的评论文字、笔记标题和可用的上级评论发送给 TypeSafe。调用会计入你的 API 用量。</p>
+        </div>
+        <div class="actions">
+          <button type="submit" disabled>保存设置</button>
+          <p id="feedback" role="status"></p>
+        </div>
+      </form>
+    </main>
+  </body>
+</html>

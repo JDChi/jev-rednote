@@ -1,0 +1,67 @@
+[
+  {
+    "id": "explicit-lead",
+    "state": { "noteTitle": "广州周末徒步路线", "comment": "想要广州路线合集的加我微信，主页有号，送新人徒步群名额。" },
+    "expected": { "promotion": true, "diandianRequest": false }
+  },
+  {
+    "id": "subtle-lead",
+    "state": { "noteTitle": "第一次买徒步鞋", "comment": "我朋友做这个的，有想试同款的可以来找我，评论说不方便，私我就好。" },
+    "expected": { "promotion": true, "diandianRequest": false }
+  },
+  {
+    "id": "normal-recommendation",
+    "state": { "noteTitle": "周末入门徒步鞋怎么选", "comment": "我穿迪卡侬那双走了两次，雨后抓地还可以，鞋头偏窄，宽脚建议试穿。" },
+    "expected": { "promotion": false, "diandianRequest": false }
+  },
+  {
+    "id": "answer-where-to-buy",
+    "state": {
+      "noteTitle": "周末入门徒步鞋怎么选",
+      "parentComment": "你这双在哪里买的？",
+      "comment": "广州天河那家迪卡侬，打折后 199。"
+    },
+    "expected": { "promotion": false, "diandianRequest": false }
+  },
+  {
+    "id": "quote-an-ad",
+    "state": { "noteTitle": "分享一次修鞋体验", "comment": "看到评论里又有人说『想领优惠就私我』，大家留意别乱加好友。" },
+    "expected": { "promotion": false, "diandianRequest": false }
+  },
+  {
+    "id": "ask-diandian",
+    "state": { "noteTitle": "广州周末徒步路线", "comment": "@点点 帮我总结一下" },
+    "expected": { "promotion": false, "diandianRequest": true }
+  },
+  {
+    "id": "ask-diandian-informal",
+    "state": { "noteTitle": "第一次买徒步鞋", "comment": "@点点 给个课代表版，提炼一下这篇的重点" },
+    "expected": { "promotion": false, "diandianRequest": true }
+  },
+  {
+    "id": "mention-diandian",
+    "state": { "noteTitle": "广州周末徒步路线", "comment": "我看了点点刚才给的总结，第三段实际没那么陡。" },
+    "expected": { "promotion": false, "diandianRequest": false }
+  },
+  {
+    "id": "ask-diandian-another-task",
+    "state": { "noteTitle": "广州周末徒步路线", "comment": "@点点 帮我查一下明天广州会不会下雨" },
+    "expected": { "promotion": false, "diandianRequest": true }
+  },
+  {
+    "id": "ask-diandian-to-recommend",
+    "state": {
+      "noteTitle": "给自己留一点时间",
+      "comment": "@点点 多给我推荐这种，狠狠研究自己，只对自己好，对自己最有责任感"
+    },
+    "expected": { "promotion": false, "diandianRequest": true }
+  },
+  {
+    "id": "quote-a-diandian-request",
+    "state": {
+      "noteTitle": "给自己留一点时间",
+      "comment": "看到有人说「@点点 多给我推荐这种」，其实我也喜欢这篇。"
+    },
+    "expected": { "promotion": false, "diandianRequest": false }
+  }
+]
