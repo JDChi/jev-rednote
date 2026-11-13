@@ -5,12 +5,11 @@ on:
     tags:
       - "v*"
 
-permissions:
-  contents: read
-
 jobs:
   package:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v7
         with:
@@ -31,3 +30,20 @@ jobs:
           path: ${{ steps.build.outputs.path }}
           archive: false
           if-no-files-found: error
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          ARCHIVE: ${{ steps.build.outputs.path }}
+        run: |
+          if release="$(gh release view "$GITHUB_REF_NAME" --json isDraft,assets)"; then
+            asset="$(basename "$ARCHIVE")"
+            if ! jq -e --arg name "$asset" '.assets | any(.name == $name and .state == "uploaded")' <<< "$release" > /dev/null; then
+              gh release upload "$GITHUB_REF_NAME" "$ARCHIVE"
+            fi
+            if jq -e '.isDraft' <<< "$release" > /dev/null; then
+              gh release edit "$GITHUB_REF_NAME" --draft=false
+            fi
+          else
+            gh release create "$GITHUB_REF_NAME" "$ARCHIVE" --verify-tag --title "$GITHUB_REF_NAME" --notes-from-tag
+          fi

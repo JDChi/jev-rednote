@@ -16,4 +16,4 @@
 - `node --test tests/jev.test.mjs` 验证 Jev 请求格式和响应处理。修改页面读取、展示或扩展通信时，运行 `node tests/chrome.mjs`，用 Playwright 的 Chromium 和模拟 Jev 响应验证浏览器行为。
 - 修改分类问题时，将新场景加入 `tests/samples.json`。使用 `node tests/evaluate.mjs` 实测时需要 `TYPESAFE_API_KEY`，每条样本会消耗一次 API 调用。
 - `python3 scripts/package.py` 将安装 ZIP 写入 `dist/`。新增运行时文件时，同步更新打包脚本的文件清单，并确认解压后的根目录有 `manifest.json`。
-- 发布时先推送更新 `manifest.json` 版本的提交，再单独推送对应的 tag。版本为 `0.1.0` 时使用 `v0.1.0`。用 `gh` 核对 GitHub Actions 的运行结果和 ZIP 产物。
+- 发布时先推送更新 `manifest.json` 版本的提交，再单独推送对应的 tag。版本为 `0.1.0` 时使用 `v0.1.0`。工作流将安装 ZIP 上传到 Actions 并附到 GitHub Release。用 `gh` 核对运行结果、最新 Release 和安装附件。

@@ -7,7 +7,7 @@
 <p align="center">打开小红书网页版笔记后，自动识别评论里的推广引流和 @点点 请求。高分评论可以折叠，也可以整条隐藏。</p>
 
 <p align="center">
-  <a href="https://github.com/JDChi/jev-rednote/actions/workflows/package.yml"><strong>下载扩展</strong></a>
+  <a href="https://github.com/JDChi/jev-rednote/releases/latest"><strong>下载扩展</strong></a>
   ·
   <a href="#安装与配置">安装与配置</a>
 </p>
@@ -29,7 +29,7 @@
 
 ## 安装与配置
 
-1. 登录 GitHub，在 [自动打包页面](https://github.com/JDChi/jev-rednote/actions/workflows/package.yml) 打开最近一次成功的运行，从 **Artifacts** 下载扩展 ZIP。也可以 [下载 main 源码 ZIP](https://github.com/JDChi/jev-rednote/archive/refs/heads/main.zip)。
+1. 打开 [最新发布](https://github.com/JDChi/jev-rednote/releases/latest)，在 **Assets** 下载 `jev-rednote-v*.zip`。也可以 [下载 main 源码 ZIP](https://github.com/JDChi/jev-rednote/archive/refs/heads/main.zip)。
 2. 解压 ZIP，在 Chrome 打开 `chrome://extensions`，开启「开发者模式」，点「加载已解压的扩展程序」，选择包含 `manifest.json` 的目录。
 3. 按 [TypeSafe 快速入门](https://docs.typesafe.ai/introduction/quickstart) 创建 API Key。点击工具栏中的扩展图标，填入 Key，勾选「打开笔记时自动分析评论」并保存。
 4. 打开一篇小红书网页版笔记。安装时已经打开的笔记需要刷新一次。向下滚动加载的主评论也会自动分析，楼中楼回复由网页照常显示。
