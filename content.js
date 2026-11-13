@@ -1,6 +1,11 @@
 (() => {
   const LOG_PREFIX = "[Jev 评论过滤]";
-  const { HIDDEN_CLASS } = jevComments;
+  const { HIDDEN_CLASS, FOLDED_THREAD_CLASS } = jevComments;
+  const WAITING_CLASS = "jev-rednote-waiting";
+  const PAGINATION_TAIL = "jev-rednote-pagination-tail";
+  const PAGINATION_TARGET = "jev-rednote-pagination-target";
+  const PAGINATION_SPACE = "jev-rednote-pagination-space";
+  const DOM_WAIT_MS = 2000;
   const LABELS = {
     promotion: { folded: "推广引流", suspected: "疑似推广" },
     diandianRequest: { folded: "点点互动请求", suspected: "疑似点点互动请求" }
@@ -18,7 +23,12 @@
   const lastSeen = new WeakMap();
   let entries = new Map();
   let requests = new Map();
+  const prepared = new Map();
+  const waiting = new Map();
+  let pagination;
+  let hasMore;
   let noteKey = null;
+  let reportedNote;
   let view = 0;
   let requestId = 0;
   let bodyId = 0;
@@ -34,6 +44,10 @@
   let errorCode;
 
   const observer = new MutationObserver(mutations => {
+    if (hideMatchedComments && mutations.some(jevComments.touchesComments)) {
+      scan(true, true);
+      return;
+    }
     if (mutations.some(mutation => mutation.type !== "attributes" ||
         mutation.target.closest("#noteContainer, .note-detail-mask, .comments-container, .comments-el"))) {
       scheduleScan();
@@ -50,6 +64,7 @@
 
   function removeTreatment(body, treatment) {
     treatment.hiddenTarget?.classList.remove(HIDDEN_CLASS);
+    treatment.thread?.classList.remove(FOLDED_THREAD_CLASS);
     body.classList.remove("jev-rednote-folded");
     if (treatment.generatedId && body.id === treatment.generatedId) body.removeAttribute("id");
     treatment.control?.remove();
@@ -57,7 +72,10 @@
   }
 
   function clearView(key) {
+    for (const entry of waiting.keys()) stopWaiting(entry);
     for (const [body, treatment] of rendered) removeTreatment(body, treatment);
+    clearPagination();
+    hasMore = undefined;
     status?.remove();
     status = undefined;
     errorCode = undefined;
@@ -67,8 +85,97 @@
     noteKey = key;
     entries = new Map();
     requests = new Map();
+    prepared.clear();
+    reportedNote = undefined;
     view += 1;
-    if (connected) port.postMessage({ type: "view", view });
+  }
+
+  function stopWaiting(entry) {
+    const hold = waiting.get(entry);
+    if (!hold) return;
+    clearTimeout(hold.timer);
+    hold.target.classList.remove(WAITING_CLASS);
+    waiting.delete(entry);
+  }
+
+  function waitForDecision(row, entry) {
+    const target = row.thread;
+    const existing = waiting.get(entry);
+    if (existing) {
+      if (existing.target !== target) {
+        existing.target.classList.remove(WAITING_CLASS);
+        existing.target = target;
+      }
+    } else {
+      const deadline = Date.now() + DOM_WAIT_MS;
+      const timer = setTimeout(() => {
+        requests.delete(entry.id);
+        stopWaiting(entry);
+        reportError("timeout");
+        scheduleScan();
+      }, DOM_WAIT_MS);
+      waiting.set(entry, { target, timer, deadline });
+    }
+    target.classList.toggle(WAITING_CLASS, true);
+  }
+
+  function clearPagination() {
+    if (!pagination) return;
+    pagination.tail?.classList.remove(PAGINATION_TAIL);
+    pagination.target?.classList.remove(PAGINATION_TARGET);
+    pagination.list.classList.remove(PAGINATION_SPACE);
+    pagination.list.style.removeProperty("--jev-rednote-pagination-space");
+    pagination = undefined;
+  }
+
+  function updatePagination(list, rows) {
+    if (!hideMatchedComments || hasMore === false) {
+      clearPagination();
+      return;
+    }
+    if (pagination?.list !== list) {
+      clearPagination();
+      pagination = { list, space: 0, wasScrollable: false };
+    }
+    const scroller = jevComments.scrollContainer(list);
+    if (!scroller) return;
+    const last = rows.at(-1);
+    const tail = rendered.get(last?.body)?.hiddenTarget;
+    const target = tail ? last.item : null;
+    if (tail !== pagination.tail) {
+      pagination.tail?.classList.remove(PAGINATION_TAIL);
+      tail?.classList.add(PAGINATION_TAIL);
+      pagination.tail = tail;
+    }
+    if (target !== pagination.target) {
+      pagination.target?.classList.remove(PAGINATION_TARGET);
+      target?.classList.add(PAGINATION_TARGET);
+      pagination.target = target;
+    }
+    const canScroll = scroller.scrollHeight > scroller.clientHeight + pagination.space + 1;
+    pagination.wasScrollable ||= canScroll;
+    const hidden = list.querySelector(`.${HIDDEN_CLASS}`);
+    let space = 0;
+    if (hidden && !canScroll && (hasMore === true || pagination.wasScrollable)) {
+      const root = scroller === document.scrollingElement;
+      const top = root ? 0 : scroller.getBoundingClientRect().top + scroller.clientTop;
+      const bottom = list.getBoundingClientRect().bottom - pagination.space + scroller.scrollTop - top;
+      space = Math.max(32, Math.ceil(scroller.clientHeight - bottom) + 32);
+    }
+    if (space !== pagination.space) {
+      pagination.space = space;
+      list.style.setProperty("--jev-rednote-pagination-space", space + "px");
+      list.classList.toggle(PAGINATION_SPACE, space > 0);
+    }
+  }
+
+  function syncView(note) {
+    if (note.key !== noteKey) clearView(note.key);
+    const title = note.title ?? "";
+    if (connected && (reportedNote?.id !== note.id || reportedNote?.title !== title)) {
+      reportedNote = { id: note.id, title };
+      port.postMessage({ type: "view", view, noteId: note.id, title });
+    }
   }
 
   function decideTreatment(scores) {
@@ -103,7 +210,8 @@
     if (tracking) {
       for (const { hiddenTarget } of rendered.values()) {
         if (hiddenTarget?.isConnected && hiddenTarget.classList.contains(HIDDEN_CLASS) &&
-            getComputedStyle(hiddenTarget).display === "none") count += 1;
+            !hiddenTarget.parentElement.closest(`.${HIDDEN_CLASS}`) &&
+            (hiddenTarget.classList.contains(PAGINATION_TAIL) || getComputedStyle(hiddenTarget).display === "none")) count += 1;
       }
     }
     if (count !== lastHiddenCount) {
@@ -115,7 +223,8 @@
   function applyTreatment(row, entry) {
     const { body } = row;
     const { decision } = entry;
-    const hiddenTarget = decision?.folded && hideMatchedComments ? jevComments.hideTarget(row) : null;
+    const hiddenTarget = decision?.folded && hideMatchedComments ? row.thread : null;
+    const foldedThread = decision?.folded && !hideMatchedComments ? row.thread : null;
     if (decision) {
       const action = decision.folded ? (hiddenTarget ? "隐藏" : "折叠") : decision.reason ? "标记" : "保留";
       logTreatment(entry, action);
@@ -127,7 +236,7 @@
         return;
       }
       if (!hiddenTarget && previous.control?.parentElement === body.parentElement) {
-        body.classList.toggle("jev-rednote-folded", previous.control.getAttribute("aria-expanded") === "false");
+        previous.setFolded?.(previous.control.getAttribute("aria-expanded") === "false", foldedThread);
         return;
       }
     }
@@ -151,14 +260,20 @@
         body.id = treatment.generatedId;
       }
       control.setAttribute("aria-controls", body.id);
-      const setFolded = collapsed => {
+      treatment.setFolded = (collapsed, thread = treatment.thread) => {
         body.classList.toggle("jev-rednote-folded", collapsed);
-        control.setAttribute("aria-expanded", String(!collapsed));
-        control.textContent = collapsed ? `已折叠 · ${reason} · 展开` : `收起 · ${reason}`;
+        if (treatment.thread !== thread) treatment.thread?.classList.remove(FOLDED_THREAD_CLASS);
+        thread?.classList.toggle(FOLDED_THREAD_CLASS, collapsed);
+        treatment.thread = thread;
+        const expanded = String(!collapsed);
+        if (control.getAttribute("aria-expanded") !== expanded) {
+          control.setAttribute("aria-expanded", expanded);
+          control.textContent = collapsed ? `已折叠 · ${reason} · 展开` : `收起 · ${reason}`;
+        }
       };
-      setFolded(true);
+      treatment.setFolded(true, foldedThread);
       control.addEventListener("click", () => {
-        setFolded(control.getAttribute("aria-expanded") === "true");
+        treatment.setFolded(control.getAttribute("aria-expanded") === "true");
       });
     } else {
       control.textContent = reason;
@@ -179,11 +294,13 @@
     if (status.parentElement !== list) list.prepend(status);
   }
 
-  function scan() {
+  function scan(queueNew = true, beforePaint = false) {
     if (!enabled) return;
     const note = jevComments.note();
-    if (note.key !== noteKey) clearView(note.key);
+    syncView(note);
     if (!note.list) {
+      clearPagination();
+      for (const entry of waiting.keys()) stopWaiting(entry);
       for (const [body, treatment] of rendered) removeTreatment(body, treatment);
       status?.remove();
       lastHiddenCount = undefined;
@@ -204,32 +321,49 @@
       if (!currentBodies.has(body)) removeTreatment(body, treatment);
     }
 
-    let queued = 0;
+    const outgoing = [];
     for (const row of rows) {
       let entry = entries.get(row.key);
-      if (!entry && connected && configured) {
+      const result = prepared.get(row.key);
+      const decision = result && Date.now() < result.deadline ? result.decision : null;
+      if (result && (!entry || entry.prepared !== result || entry.decision !== decision)) {
+        if (entry) {
+          requests.delete(entry.id);
+          stopWaiting(entry);
+        }
+        entry = { id: entry?.id ?? ++requestId, comment: row.comment, decision, prepared: result };
+        entries.set(row.key, entry);
+      }
+      if (queueNew && !entry && connected && configured) {
         entry = { id: ++requestId, comment: row.comment };
         entries.set(row.key, entry);
         requests.set(entry.id, entry);
-        port.postMessage({
-          type: "analyze",
-          view,
+        if (beforePaint) waitForDecision(row, entry);
+        outgoing.push({
           id: entry.id,
-          state: { noteTitle: note.title, comment: row.comment, parentComment: row.parentComment ?? "" }
+          deadline: waiting.get(entry)?.deadline,
+          commentId: typeof row.key === "string" ? row.key : null,
+          state: { noteTitle: note.title, comment: row.comment }
         });
-        queued += 1;
       }
       if (entry?.comment === row.comment) {
+        if (waiting.has(entry)) waitForDecision(row, entry);
         applyTreatment(row, entry);
       } else if (rendered.has(row.body)) {
         removeTreatment(row.body, rendered.get(row.body));
       }
     }
-    if (!hasScanned || queued > 0) {
-      console.info(LOG_PREFIX, `读取到 ${rows.length} 条文字评论，本次提交 ${queued} 条分析。`);
+    if (outgoing.length && hideMatchedComments) {
+      port.postMessage({ type: "analyze-batch", view, rows: outgoing });
+    } else {
+      for (const row of outgoing) port.postMessage({ type: "analyze", view, ...row });
+    }
+    if (!hasScanned || outgoing.length > 0) {
+      console.info(LOG_PREFIX, `读取到 ${rows.length} 条主评论，本次提交 ${outgoing.length} 条分析。`);
       hasScanned = true;
     }
     showStatus(note.list);
+    updatePagination(note.list, rows);
     reportHiddenCount();
   }
 
@@ -239,6 +373,10 @@
     hideMatchedComments = message.hideMatchedComments === true;
     // A display-only change must not send a view message, which cancels queued requests.
     if (!firstMessage && !message.reset) {
+      if (!hideMatchedComments) {
+        for (const entry of waiting.keys()) stopWaiting(entry);
+        clearPagination();
+      }
       scheduleScan();
       return;
     }
@@ -252,20 +390,47 @@
       console.info(LOG_PREFIX, "自动分析已开启，正在等待笔记评论。");
     }
     if (message.reset || !enabled) clearView(null);
-    else port.postMessage({ type: "view", view });
+    if (firstMessage) reportedNote = undefined;
 
     if (enabled) {
-      observer.observe(document.body, {
+      syncView(jevComments.note());
+      observer.observe(document, {
         childList: true,
         subtree: true,
         characterData: true,
         attributes: true,
-        attributeFilter: ["hidden", "aria-hidden", "data-note-id", "style", "class"]
+        attributeFilter: ["hidden", "aria-hidden", "data-note-id", "data-comment-id", "id", "style", "class"]
       });
       scheduleScan();
     } else {
       observer.disconnect();
     }
+  }
+
+  function reportError(code) {
+    if (ERRORS[code] && errorCode !== code) {
+      errorCode = code;
+      console.warn(LOG_PREFIX, ERRORS[code]);
+    }
+  }
+
+  function onPrepared(message) {
+    if (!enabled || !hideMatchedComments) return;
+    const note = jevComments.note();
+    syncView(note);
+    if (message.view !== view || message.noteId !== note.id) return;
+    for (const { id, scores } of message.rows) {
+      prepared.set(id, {
+        decision: scores ? decideTreatment(scores) : null,
+        deadline: message.deadline ?? Infinity,
+        delivery: message.delivery
+      });
+    }
+    reportError(message.error);
+    const judged = message.rows.filter(row => row.scores).length;
+    console.info(LOG_PREFIX, `评论响应 · ${judged} 条已判断 · ${message.rows.length - judged} 条原文放行。`);
+    port.postMessage({ type: "ack", view, delivery: message.delivery });
+    scheduleScan();
   }
 
   function connect() {
@@ -279,14 +444,42 @@
         onSettings(message);
         return;
       }
+      if (message.type === "prepared") {
+        onPrepared(message);
+        return;
+      }
+      if (message.type === "pagination" && message.view === view && message.noteId === reportedNote?.id) {
+        hasMore = message.hasMore;
+        scheduleScan();
+        return;
+      }
+      if (message.type === "response-status") {
+        console.info(LOG_PREFIX, message.active ? "评论响应监听已连接。" : "评论响应监听不可用，使用页面内判定。");
+        return;
+      }
+      if (message.type === "confirmed" && message.view === view) {
+        for (const id of message.ids) {
+          const result = prepared.get(id);
+          if (result?.delivery === message.delivery) result.deadline = Infinity;
+        }
+        return;
+      }
       if (message.type !== "result" || message.view !== view) return;
       const entry = requests.get(message.id);
       if (!entry) return;
       requests.delete(message.id);
+      const hold = waiting.get(entry);
+      if (hold && Date.now() >= hold.deadline) {
+        stopWaiting(entry);
+        reportError("timeout");
+        scheduleScan();
+        return;
+      }
       if (message.scores) entry.decision = decideTreatment(message.scores);
-      if (ERRORS[message.error] && errorCode !== message.error) {
-        errorCode = message.error;
-        console.warn(LOG_PREFIX, ERRORS[errorCode]);
+      reportError(message.error);
+      if (waiting.has(entry)) {
+        scan(false);
+        stopWaiting(entry);
       }
       scheduleScan();
     });
@@ -296,6 +489,7 @@
       if (requests.size) {
         console.warn(LOG_PREFIX, `扩展后台连接中断，${requests.size} 条评论分析未完成。`);
         requests.clear();
+        for (const entry of waiting.keys()) stopWaiting(entry);
         errorCode = "unavailable";
         scheduleScan();
       }
@@ -303,7 +497,11 @@
     });
   }
 
-  window.addEventListener("popstate", scheduleScan);
-  window.navigation?.addEventListener("currententrychange", scheduleScan);
+  const onNavigation = () => {
+    if (enabled) syncView(jevComments.note());
+    scheduleScan();
+  };
+  window.addEventListener("popstate", onNavigation);
+  window.navigation?.addEventListener("currententrychange", onNavigation);
   connect();
 })();

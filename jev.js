@@ -28,6 +28,25 @@ export function commentState(payload) {
 }
 
 export async function analyzeComment(apiKey, state, signal, timeoutMs = REQUEST_TIMEOUT_MS) {
+  return analyze(apiKey, state, QUESTIONS, signal, timeoutMs);
+}
+
+export async function analyzeComments(apiKey, states, signal, timeoutMs = REQUEST_TIMEOUT_MS) {
+  const comments = states.map(({ noteTitle, ...comment }, index) => ({ index, ...comment }));
+  const questions = Object.fromEntries(comments.flatMap(({ index }) =>
+    Object.entries(QUESTIONS).map(([key, question]) => [`comment_${index}_${key}`, {
+      ...question,
+      instructions: `只评估 state.comments 中 index 为 ${index} 的那一项，parentComment 也取该项。\n${question.instructions}`
+    }])
+  ));
+  const result = await analyze(apiKey, { noteTitle: states[0].noteTitle, comments }, questions, signal, timeoutMs);
+  if (!result.scores) return result;
+  return { scores: comments.map(({ index }) => Object.fromEntries(
+    Object.keys(QUESTIONS).map(key => [key, result.scores[`comment_${index}_${key}`]])
+  )) };
+}
+
+async function analyze(apiKey, state, questions, signal, timeoutMs = REQUEST_TIMEOUT_MS) {
   const timeout = AbortSignal.timeout(timeoutMs);
   const request = new AbortController();
   const abort = () => request.abort();
@@ -42,7 +61,7 @@ export async function analyzeComment(apiKey, state, signal, timeoutMs = REQUEST_
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json"
       },
-      body: JSON.stringify({ model: "jev-latest", state, questions: QUESTIONS }),
+      body: JSON.stringify({ model: "jev-latest", state, questions }),
       credentials: "omit",
       redirect: "error",
       signal: request.signal
@@ -61,7 +80,7 @@ export async function analyzeComment(apiKey, state, signal, timeoutMs = REQUEST_
 
     const data = await response.json();
     const scores = {};
-    for (const question of Object.keys(QUESTIONS)) {
+    for (const question of Object.keys(questions)) {
       const answer = data?.answers?.[question];
       if (answer?.type !== "noul" || !Number.isFinite(answer.noul) ||
           answer.noul < 0 || answer.noul > 1) {

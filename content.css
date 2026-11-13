@@ -1,6 +1,35 @@
 .jev-rednote-folded,
+.jev-rednote-thread-folded :is(.reply-container, .sub-comment-list, .comment-item-sub, .comment-item .comment-item, .show-more, .reply-more),
 .jev-rednote-hidden {
   display: none !important;
+}
+
+.jev-rednote-waiting,
+.jev-rednote-waiting *,
+.jev-rednote-hidden.jev-rednote-pagination-tail,
+.jev-rednote-hidden.jev-rednote-pagination-tail * {
+  visibility: hidden !important;
+}
+
+.jev-rednote-hidden.jev-rednote-pagination-tail,
+.jev-rednote-pagination-tail .jev-rednote-pagination-target {
+  display: block !important;
+  height: 1px !important;
+  min-height: 1px !important;
+  max-height: 1px !important;
+  box-sizing: border-box !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  overflow: hidden !important;
+  pointer-events: none !important;
+}
+
+.jev-rednote-pagination-space::after {
+  content: "";
+  display: block;
+  height: var(--jev-rednote-pagination-space);
+  pointer-events: none;
 }
 
 .jev-rednote-toggle,

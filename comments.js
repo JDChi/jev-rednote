@@ -5,6 +5,8 @@ const jevComments = (() => {
   const REPLY_LIST = ".reply-container, .sub-comment-list";
   const BODY = ".content, .note-text, .comment-content";
   const HIDDEN_CLASS = "jev-rednote-hidden";
+  const HIDDEN = `.${HIDDEN_CLASS}`;
+  const FOLDED_THREAD_CLASS = "jev-rednote-thread-folded";
 
   function text(element) {
     return element?.textContent.replace(/\s+/g, " ").trim() ?? "";
@@ -25,70 +27,65 @@ const jevComments = (() => {
       const panelId = panel?.getAttribute("data-note-id");
       if (routeId && panelId && routeId !== panelId) continue;
       const title = text(scope.querySelector("#detail-title, .note-content > .title"));
-      return { key: routeId || panelId || panel, list, title };
+      return { key: routeId || panelId || panel, id: routeId || panelId || null, list, title };
     }
-    return { key: routeId ?? null };
+    return { key: routeId ?? null, id: routeId ?? null };
+  }
+
+  function commentId(item) {
+    return item.getAttribute("data-comment-id") || item.id.match(/^comment-(.+)$/)?.[1];
+  }
+
+  function isMainComment(item) {
+    return !item.classList.contains("comment-item-sub") &&
+      !item.closest(REPLY_LIST) && !item.parentElement?.closest(COMMENT);
+  }
+
+  function touchesComments(mutation) {
+    const target = mutation.target instanceof Element ? mutation.target : mutation.target.parentElement;
+    if (target?.closest(REPLY_LIST)) return false;
+    const comment = target?.closest(COMMENT);
+    if (comment && isMainComment(comment)) return true;
+    const candidates = mutation.type === "attributes" ? [target] : mutation.addedNodes;
+    for (const node of candidates) {
+      if (!(node instanceof Element)) continue;
+      if (node.matches(COMMENT) && isMainComment(node)) return true;
+      if (Array.from(node.querySelectorAll(COMMENT)).some(isMainComment)) return true;
+    }
+    return false;
+  }
+
+  function scrollContainer(list) {
+    for (let node = list.parentElement; node; node = node.parentElement) {
+      if (/^(auto|scroll|overlay)$/.test(getComputedStyle(node).overflowY)) return node;
+    }
+    return document.scrollingElement;
   }
 
   function own(item, selector) {
     return Array.from(item.querySelectorAll(selector)).find(el => el.closest(COMMENT) === item);
   }
 
-  function hideTarget({ item, thread, isReply }) {
-    if (item.querySelector(`${COMMENT}, ${REPLY_LIST}, .show-more, .reply-more`)) return null;
-    if (!isReply && item.parentElement === thread && thread.childElementCount === 1) {
-      return thread;
-    }
-    return item;
-  }
-
   function read(list) {
     const comments = [];
-    const byItem = new Map();
-    const threads = new Map();
     for (const item of list.querySelectorAll(COMMENT)) {
-      if (!item.getClientRects().length) {
-        const hiddenByExtension = item.classList.contains(HIDDEN_CLASS) ||
-          item.parentElement.matches(`.parent-comment.${HIDDEN_CLASS}`);
-        if (!hiddenByExtension || item.closest("[hidden]")) continue;
-      }
+      if (!isMainComment(item)) continue;
+      if (!item.getClientRects().length && (!item.closest(HIDDEN) || item.closest("[hidden]"))) continue;
       const body = own(item, BODY);
       const comment = text(body);
       if (!comment || body.querySelector(COMMENT)) continue;
 
-      const id = item.getAttribute("data-comment-id") || item.id.match(/^comment-(.+)$/)?.[1];
-      const thread = item.closest(".parent-comment");
-      const row = {
+      const id = commentId(item);
+      comments.push({
         item,
         body,
         comment,
         key: id || item,
-        thread,
-        author: text(own(item, ".author-wrapper .name, .author .name, .user-name")),
-        isReply: Boolean(item.closest(REPLY_LIST) || item.classList.contains("comment-item-sub"))
-      };
-      comments.push(row);
-      byItem.set(item, row);
-      if (thread) {
-        if (!threads.has(thread)) threads.set(thread, []);
-        threads.get(thread).push(row);
-      }
-    }
-
-    for (const row of comments) {
-      const enclosing = row.item.parentElement.closest(COMMENT);
-      if (!row.isReply && !enclosing) continue;
-      const thread = threads.get(row.thread) ?? [];
-      const target = text(row.body.querySelector(":scope > .nickname, :scope > .reply-to"));
-      if (target) {
-        const matches = thread.filter(candidate => candidate !== row && candidate.author === target);
-        if (matches.length === 1) row.parentComment = matches[0].comment;
-      } else {
-        row.parentComment = (byItem.get(enclosing) ?? thread.find(candidate => !candidate.isReply))?.comment;
-      }
+        thread: item.closest(".parent-comment") ?? item
+      });
     }
     return comments;
   }
 
-  return { note, read, hideTarget, HIDDEN_CLASS };
+  return { note, read, touchesComments, scrollContainer, HIDDEN_CLASS, FOLDED_THREAD_CLASS };
 })();

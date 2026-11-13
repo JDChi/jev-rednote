@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { analyzeComment, commentState } from "../jev.js";
+import { analyzeComment, analyzeComments, commentState } from "../jev.js";
 
 const controller = new AbortController();
 const state = { noteTitle: "广州徒步", comment: "私我拿路线", parentComment: "有路线图吗？" };
@@ -77,4 +77,29 @@ test("bounds comment data and excludes unrelated fields", () => {
   assert.deepEqual(commentState({ ...state, userId: "local-only", cookie: "local-only" }), state);
   assert.deepEqual(commentState({ comment: "  路线很好走  " }), { noteTitle: "", comment: "路线很好走" });
   assert.equal(commentState({ comment: "字".repeat(3000) }).comment.length, 2000);
+});
+
+test("batches named answers while keeping each comment's parent context", async t => {
+  t.mock.method(globalThis, "fetch", async (_, request) => {
+    const body = JSON.parse(request.body);
+    assert.deepEqual(body.state, {
+      noteTitle: state.noteTitle,
+      comments: [
+        { index: 0, comment: state.comment, parentComment: state.parentComment },
+        { index: 1, comment: "@点点 帮我总结" }
+      ]
+    });
+    assert.match(body.questions.comment_1_promotion.instructions, /index 为 1/);
+    return Response.json({ answers: {
+      comment_1_diandianRequest: { type: "noul", noul: 0.98 },
+      comment_0_promotion: { type: "noul", noul: 0.96 },
+      comment_1_promotion: { type: "noul", noul: 0.03 },
+      comment_0_diandianRequest: { type: "noul", noul: 0.01 }
+    } });
+  });
+  assert.deepEqual(await analyzeComments("sample", [state, {
+    noteTitle: state.noteTitle, comment: "@点点 帮我总结"
+  }], controller.signal), {
+    scores: [{ promotion: 0.96, diandianRequest: 0.01 }, { promotion: 0.03, diandianRequest: 0.98 }]
+  });
 });

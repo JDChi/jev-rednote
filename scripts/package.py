@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parent.parent
 EXTENSION_FILES = (
     "manifest.json",
     "background.js",
+    "comment-responses.js",
     "jev.js",
     "comments.js",
     "content.js",

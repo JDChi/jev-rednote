@@ -1,4 +1,5 @@
-import { analyzeComment, commentState } from "./jev.js";
+import { analyzeComment, analyzeComments, commentState } from "./jev.js";
+import { isRedNotePage, manageCommentResponses } from "./comment-responses.js";
 
 const MAX_CONCURRENT = 3;
 const clients = new Set();
@@ -7,6 +8,7 @@ let queue = [];
 let settings = {};
 let authFailed = false;
 let limitedUntil = 0;
+let deliveryId = 0;
 
 const ready = (async () => {
   await chrome.storage.local.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" });
@@ -35,15 +37,17 @@ function sendSettings(client, reset = false) {
 }
 
 function cancelJobs(client) {
-  queue = queue.filter(job => job.client !== client);
-  for (const job of active) {
-    if (job.client === client) job.controller.abort();
-  }
+  client.controller.abort();
+  client.controller = new AbortController();
+  responses.cancel(client);
+  client.work.clear();
+  client.delivered.clear();
 }
 
 function disconnect(client) {
   clients.delete(client);
   cancelJobs(client);
+  responses.configure(client, false);
 }
 
 chrome.storage.onChanged.addListener((changes, area) => {
@@ -64,6 +68,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
         client.view = null;
       }
       sendSettings(client, reset);
+      responses.configure(client, useResponses(client));
     }
   });
 });
@@ -76,22 +81,54 @@ function serviceError() {
   return null;
 }
 
-function sendResult(job, result) {
-  if (job.client.view !== job.view) return;
-  send(job.client, { type: "result", view: job.view, id: job.id, ...result });
+function useResponses(client) {
+  return clients.has(client) && settings.enabled === true && settings.hideMatchedComments === true && Boolean(settings.apiKey);
+}
+
+function enqueue(analyze, signal, urgent = false) {
+  return new Promise(resolve => {
+    if (signal.aborted) {
+      resolve({ error: "canceled" });
+      return;
+    }
+    const job = { analyze, signal, urgent, enqueuedAt: performance.now() };
+    const cancel = () => {
+      queue = queue.filter(queued => queued !== job);
+      resolve({ error: "canceled" });
+    };
+    signal.addEventListener("abort", cancel, { once: true });
+    job.finish = result => {
+      signal.removeEventListener("abort", cancel);
+      resolve(result);
+    };
+    if (urgent) {
+      const next = queue.findIndex(queued => !queued.urgent);
+      queue.splice(next < 0 ? queue.length : next, 0, job);
+    } else {
+      queue.push(job);
+    }
+    drain();
+  });
 }
 
 async function run(job) {
+  const startedAt = performance.now();
   try {
-    const result = await analyzeComment(settings.apiKey, job.state, job.controller.signal);
-    if (job.controller.signal.aborted) return;
-
+    const result = await job.analyze(settings.apiKey);
+    if (job.urgent) {
+      const queuedMs = Math.round(startedAt - job.enqueuedAt);
+      const requestMs = Math.round(performance.now() - startedAt);
+      console.info("[Jev 评论过滤]", `Jev 批次 · 排队 ${queuedMs}ms · 请求 ${requestMs}ms · ${result.error ?? "完成"}`);
+    }
+    if (job.signal.aborted) return;
     if (result.error === "auth") authFailed = true;
     if (result.error === "limited") {
       limitedUntil = Math.max(limitedUntil, Date.now() + result.retryAfterMs);
     }
     const { retryAfterMs, ...reply } = result;
-    sendResult(job, reply);
+    job.finish(reply);
+  } catch {
+    job.finish({ error: "unavailable" });
   } finally {
     active.delete(job);
     drain();
@@ -103,7 +140,7 @@ function drain() {
     const job = queue.shift();
     const error = serviceError();
     if (error) {
-      sendResult(job, { error });
+      job.finish({ error });
       continue;
     }
     active.add(job);
@@ -111,38 +148,141 @@ function drain() {
   }
 }
 
+function analyzeRows(client, rows, signal, deadline, urgent = false) {
+  const missing = new Map();
+  for (const row of rows) {
+    if (!client.work.has(row.id) && !client.delivered.has(row.id)) missing.set(row.id, row);
+  }
+  const fresh = [...missing.values()];
+  for (let start = 0; start < fresh.length; start += 5) {
+    const batch = fresh.slice(start, start + 5);
+    const results = enqueue(key => {
+      const timeout = deadline === undefined ? undefined : deadline - Date.now();
+      return timeout <= 0 ? { error: "timeout" } : analyzeComments(key, batch.map(row => row.state), signal, timeout);
+    }, signal, urgent);
+    batch.forEach(({ id }, index) => {
+      const result = results.then(({ scores, error }) => scores ? { scores: scores[index] } : { error });
+      client.work.set(id, result);
+    });
+  }
+  return rows.map(({ id }) => client.delivered.get(id) ?? client.work.get(id));
+}
+
+function prepareResponse(client, rows, error, signal, deadline) {
+  const delivery = ++deliveryId;
+  const message = { type: "prepared", view: client.view, noteId: client.noteId, delivery, rows, error, deadline };
+  const save = () => {
+    for (const { id, ...result } of rows) client.delivered.set(id, result);
+  };
+  if (!rows.some(row => row.scores)) {
+    save();
+    send(client, message);
+    return false;
+  }
+  return new Promise(resolve => {
+    if (signal.aborted) {
+      resolve(false);
+      return;
+    }
+    const finish = accepted => {
+      signal.removeEventListener("abort", cancel);
+      client.acks.delete(delivery);
+      const confirmed = accepted && !signal.aborted && Date.now() < deadline;
+      if (confirmed) {
+        save();
+        send(client, {
+          type: "confirmed", view: message.view, delivery, ids: rows.map(row => row.id)
+        });
+      }
+      resolve(confirmed);
+    };
+    const cancel = () => finish(false);
+    signal.addEventListener("abort", cancel, { once: true });
+    client.acks.set(delivery, finish);
+    send(client, message);
+  });
+}
+
+const responses = manageCommentResponses({
+  activeFor: useResponses,
+  analyze: (client, rows, signal, deadline) => analyzeRows(client, rows, signal, deadline, true),
+  prepare: prepareResponse,
+  send
+});
+
+function sendDOMResult(client, view, requestId, commentId, result) {
+  void Promise.resolve(result).then(reply => {
+    if (client.view === view) send(client, {
+      type: "result", view, id: requestId, ...(client.delivered.get(commentId) ?? reply)
+    });
+  });
+}
+
 chrome.runtime.onConnect.addListener(port => {
   if (port.name !== "jev-comments" || port.sender?.frameId !== 0 ||
-      !port.sender?.url?.startsWith("https://www.xiaohongshu.com/")) {
+      !isRedNotePage(port.sender?.url) || !Number.isInteger(port.sender.tab?.id)) {
     port.disconnect();
     return;
   }
 
-  const client = { port, view: null };
+  const client = {
+    port, view: null, noteId: null, title: "", controller: new AbortController(),
+    responses: new Set(), work: new Map(), delivered: new Map(), acks: new Map()
+  };
   clients.add(client);
   port.onDisconnect.addListener(() => disconnect(client));
   port.onMessage.addListener(message => {
     void ready.then(() => {
       if (!clients.has(client) || !Number.isSafeInteger(message?.view)) return;
       if (message.type === "view") {
-        cancelJobs(client);
+        if (message.view !== client.view || message.noteId !== client.noteId) cancelJobs(client);
         client.view = message.view;
+        client.noteId = message.noteId;
+        client.title = typeof message.title === "string" ? message.title : "";
         return;
       }
-      if (message.type !== "analyze" || message.view !== client.view ||
-          !Number.isSafeInteger(message.id)) return;
+      if (message.type === "ack" && message.view === client.view) {
+        client.acks.get(message.delivery)?.(true);
+        return;
+      }
+      if (message.view !== client.view) return;
+      if (message.type === "analyze-batch" && Array.isArray(message.rows)) {
+        const rows = [];
+        for (const row of message.rows) {
+          if (!Number.isSafeInteger(row?.id)) continue;
+          const state = commentState(row.state);
+          const id = typeof row.commentId === "string" ? row.commentId : row.id;
+          if (state) {
+            rows.push({ id, requestId: row.id, state, deadline: row.deadline });
+          } else {
+            sendDOMResult(client, message.view, row.id, id, { error: "response" });
+          }
+        }
+        const deadline = rows.reduce((earliest, row) => Number.isFinite(row.deadline)
+          ? Math.min(earliest ?? Infinity, row.deadline) : earliest, undefined);
+        const results = analyzeRows(client, rows, client.controller.signal, deadline);
+        rows.forEach(({ id, requestId }, index) => sendDOMResult(client, message.view, requestId, id, results[index]));
+        return;
+      }
+      if (message.type !== "analyze" || !Number.isSafeInteger(message.id)) return;
 
-      const job = { client, view: message.view, id: message.id };
-      const error = serviceError();
       const state = commentState(message.state);
-      if (error || !state) {
-        sendResult(job, { error: error ?? "response" });
-        return;
+      const id = typeof message.commentId === "string" ? message.commentId : null;
+      let result = client.delivered.get(id) ?? client.work.get(id);
+      if (!result) {
+        const { signal } = client.controller;
+        result = state ? enqueue(key => {
+          const timeout = Number.isFinite(message.deadline) ? message.deadline - Date.now() : undefined;
+          return timeout <= 0 ? { error: "timeout" } : analyzeComment(key, state, signal, timeout);
+        }, signal) : { error: "response" };
+        if (state && id) client.work.set(id, result);
       }
-      queue.push({ ...job, state, controller: new AbortController() });
-      drain();
+      sendDOMResult(client, message.view, message.id, id, result);
     });
   });
 
-  void ready.then(() => sendSettings(client));
+  void ready.then(() => {
+    sendSettings(client);
+    responses.configure(client, useResponses(client));
+  });
 });
