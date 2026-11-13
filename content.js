@@ -42,6 +42,7 @@
   let timer;
   let status;
   let errorCode;
+  let loggedTimeout = false;
 
   const observer = new MutationObserver(mutations => {
     if (hideMatchedComments && mutations.some(jevComments.touchesComments)) {
@@ -79,6 +80,7 @@
     status?.remove();
     status = undefined;
     errorCode = undefined;
+    loggedTimeout = false;
     hasScanned = false;
     if (!enabled) reportHiddenCount();
     lastHiddenCount = undefined;
@@ -408,6 +410,11 @@
   }
 
   function reportError(code) {
+    if (code === "timeout") {
+      if (!loggedTimeout) console.warn(LOG_PREFIX, ERRORS.timeout);
+      loggedTimeout = true;
+      return;
+    }
     if (ERRORS[code] && errorCode !== code) {
       errorCode = code;
       console.warn(LOG_PREFIX, ERRORS[code]);

@@ -434,6 +434,7 @@ try {
   });
   assert.equal(await page.locator("#comment-slow").isVisible(), true);
   assert.equal(await page.locator("#comment-xhr-keep-2").isVisible(), true);
+  assert.equal(await page.locator(".jev-rednote-status").count(), 0);
   const xhrCalls = await worker.evaluate(start => mock.calls.slice(start), beforeXHR);
   assert.equal(xhrCalls.length, 3);
   assert.ok(xhrCalls.every(({ state }) => state.comments?.length <= 5));
@@ -527,6 +528,8 @@ try {
     while (mock.active) await new Promise(resolve => setTimeout(resolve, 10));
   });
   assert.equal(await fallback.isVisible(), true);
+  assert.equal(await page.locator(".jev-rednote-status").count(), 0);
+  assert.ok(logs.some(line => line.includes("部分评论分析超时，原文已保留。")));
   assert.equal(await worker.evaluate(() => mock.peak), 3);
   assert.deepEqual(errors, []);
   console.log("Chrome MV3 smoke test passed (isolated profile, mocked Jev).");
