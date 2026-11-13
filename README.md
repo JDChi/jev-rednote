@@ -10,6 +10,8 @@
   <a href="https://github.com/JDChi/jev-rednote/releases/latest"><strong>下载扩展</strong></a>
   ·
   <a href="#安装与配置">安装与配置</a>
+  ·
+  <a href="PRIVACY.md">隐私政策</a>
 </p>
 
 ## 效果展示
