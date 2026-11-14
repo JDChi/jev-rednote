@@ -6,10 +6,12 @@
   const PAGINATION_TARGET = "jev-rednote-pagination-target";
   const PAGINATION_SPACE = "jev-rednote-pagination-space";
   const DOM_WAIT_MS = 2000;
-  const LABELS = {
-    promotion: { folded: "推广引流", suspected: "疑似推广" },
-    diandianRequest: { folded: "点点互动请求", suspected: "疑似点点互动请求" }
-  };
+  const TREATMENTS = [
+    { key: "promotion", threshold: 0.95, folded: true, reason: "推广引流" },
+    { key: "diandianRequest", threshold: 0.95, folded: true, reason: "点点互动请求" },
+    { key: "promotion", threshold: 0.75, folded: false, reason: "疑似推广" },
+    { key: "diandianRequest", threshold: 0.75, folded: false, reason: "疑似点点互动请求" }
+  ];
   const ERRORS = {
     "missing-key": "请在扩展设置中填写 TypeSafe API Key。",
     auth: "TypeSafe 拒绝了请求。请检查扩展设置中的 API Key。",
@@ -181,18 +183,8 @@
   }
 
   function decideTreatment(scores) {
-    const reasons = [];
-    let folded = false;
-    for (const [key, labels] of Object.entries(LABELS)) {
-      const score = scores[key];
-      if (score >= 0.95) {
-        folded = true;
-        reasons.push(labels.folded);
-      } else if (score >= 0.75) {
-        reasons.push(labels.suspected);
-      }
-    }
-    return { folded, reason: reasons.join("、"), scores };
+    const match = TREATMENTS.find(({ key, threshold }) => scores[key] >= threshold);
+    return { folded: match?.folded ?? false, reason: match?.reason ?? "", scores };
   }
 
   function logTreatment(entry, action) {

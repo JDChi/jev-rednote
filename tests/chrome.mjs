@@ -150,9 +150,12 @@ try {
         const answers = {};
         for (const { index, comment } of comments) {
           const prefix = `comment_${index}_`;
-          const promotion = comment === "我朋友就做这个，有需要来找我" ? 0.75 :
+          const suspected = comment === "我朋友就做这个，有需要来找我";
+          // Exercise overlapping hits for both high, both suspected, and mixed scores.
+          const promotion = suspected || comment === subscription ? 0.75 :
             ["加我微信领取资料", "旧笔记迟到结果", pendingPromotion, "响应超时的推广评论"].includes(comment) ? 0.95 : 0.10;
-          const diandianRequest = ["@点点 帮我总结一下", `@点点 ${recommendation}`, subscription, replyOnly]
+          const diandianRequest = suspected ? 0.75 :
+            ["加我微信领取资料", "@点点 帮我总结一下", `@点点 ${recommendation}`, subscription, replyOnly]
             .includes(comment) ? 0.97 : 0.10;
           answers[prefix + "promotion"] = { type: "noul", noul: promotion };
           answers[prefix + "diandianRequest"] = { type: "noul", noul: diandianRequest };
@@ -199,7 +202,7 @@ try {
   });
   await page.goto(site + noteA);
   const promo = page.locator("#comment-promo");
-  const promoFold = promo.getByRole("button", { name: "已折叠 · 推广引流 · 展开" });
+  const promoFold = promo.getByRole("button", { name: "已折叠 · 推广引流 · 展开", exact: true });
   const promoCollapse = promo.getByRole("button", { name: "收起 · 推广引流" });
   assert.equal(await promo.locator(".content").isVisible(), true);
   assert.equal(await worker.evaluate(() => mock.calls.length), 0);
@@ -208,7 +211,12 @@ try {
   await options.locator("#enabled:checked").waitFor();
   assert.equal(await hide.isChecked(), false);
   await promoFold.waitFor();
-  await page.getByText("疑似推广", { exact: true }).waitFor();
+  const suspected = page.locator("#comment-suspected");
+  await suspected.getByText("疑似推广", { exact: true }).waitFor();
+  const treatmentSelector = ".jev-rednote-toggle, .jev-rednote-label";
+  assert.equal(await promo.locator(treatmentSelector).count(), 1);
+  assert.equal(await suspected.locator(treatmentSelector).count(), 1);
+  assert.equal(await suspected.locator(".content").isVisible(), true);
   assert.equal(await promo.locator(".content").isVisible(), false);
   assert.equal(await page.locator("#comment-parent .content").isVisible(), false);
   assert.equal(await page.getByRole("button", { name: "展开更多回复" }).isVisible(), false);
@@ -218,8 +226,9 @@ try {
 
   const subscribe = page.locator("#comment-subscribe");
   const subscriptionReply = page.locator("#comment-subscription-reply");
-  const subscriptionFold = subscribe.getByRole("button", { name: "已折叠 · 点点互动请求 · 展开" });
+  const subscriptionFold = subscribe.getByRole("button", { name: "已折叠 · 点点互动请求 · 展开", exact: true });
   await subscriptionFold.waitFor();
+  assert.equal(await subscribe.locator(treatmentSelector).count(), 1);
   assert.equal(await subscriptionReply.isVisible(), false);
   await subscriptionFold.click();
   assert.equal(await subscriptionReply.isVisible(), true);
@@ -412,11 +421,11 @@ try {
         hasMore: data.has_more,
         elapsed: performance.now() - start,
         visible: Object.fromEntries(data.comments.map(({ id }) => [id, Boolean(document.getElementById(`comment-${id}`).getClientRects().length)])),
-        folded: Boolean(document.querySelector("#comment-xhr-folded .jev-rednote-toggle")),
+        foldLabel: document.querySelector("#comment-xhr-folded .jev-rednote-toggle")?.textContent,
         foldedBodyVisible: Boolean(document.querySelector("#comment-xhr-folded .content")?.getClientRects().length),
         foldedChildVisible: Boolean(document.querySelector("#comment-xhr-folded-child")?.getClientRects().length),
         childVisible: Boolean(document.querySelector("#comment-xhr-child")?.getClientRects().length),
-        suspectLabeled: Boolean(document.querySelector("#comment-xhr-suspect .jev-rednote-label"))
+        suspectLabel: document.querySelector("#comment-xhr-suspect .jev-rednote-label")?.textContent
       }));
     };
     xhr.send();
@@ -427,7 +436,7 @@ try {
   assert.equal(first.childVisible, false);
   assert.equal(first.visible["xhr-normal"], true);
   assert.equal(first.visible["xhr-keep-2"], true, "the slow batch should show its original comments");
-  assert.equal(first.suspectLabeled, true);
+  assert.equal(first.suspectLabel, "疑似推广");
   assert.equal(first.cursor, "keep-cursor");
   assert.equal(first.hasMore, true);
   const reply = await renderXHR(`${commentsAPI}/sub/page?${query}&root_comment_id=xhr-normal`);
@@ -458,7 +467,7 @@ try {
   assert.equal(await page.locator(".jev-rednote-hidden").count(), 0);
   const folded = await renderXHR(`${commentsAPI}/page?${query}&folded=1`);
   assert.equal(folded.visible["xhr-folded"], true);
-  assert.equal(folded.folded, true, "promotion must be folded on the first animation frame");
+  assert.equal(folded.foldLabel, "已折叠 · 推广引流 · 展开", "promotion must be folded on the first animation frame");
   assert.equal(folded.foldedBodyVisible, false);
   assert.equal(folded.foldedChildVisible, false);
   assert.ok(responseLogs.some(line => line.includes("判断完成 1/1 条")));
