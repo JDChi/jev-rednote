@@ -45,7 +45,7 @@
   let loggedTimeout = false;
 
   const observer = new MutationObserver(mutations => {
-    if (hideMatchedComments && mutations.some(jevComments.touchesComments)) {
+    if (mutations.some(jevComments.touchesComments)) {
       scan(true, true);
       return;
     }
@@ -355,10 +355,8 @@
         removeTreatment(row.body, rendered.get(row.body));
       }
     }
-    if (outgoing.length && hideMatchedComments) {
+    if (outgoing.length) {
       port.postMessage({ type: "analyze-batch", view, rows: outgoing });
-    } else {
-      for (const row of outgoing) port.postMessage({ type: "analyze", view, ...row });
     }
     if (!hasScanned || outgoing.length > 0) {
       console.info(LOG_PREFIX, `读取到 ${rows.length} 条主评论，本次提交 ${outgoing.length} 条分析。`);
@@ -375,10 +373,6 @@
     hideMatchedComments = message.hideMatchedComments === true;
     // A display-only change must not send a view message, which cancels queued requests.
     if (!firstMessage && !message.reset) {
-      if (!hideMatchedComments) {
-        for (const entry of waiting.keys()) stopWaiting(entry);
-        clearPagination();
-      }
       scheduleScan();
       return;
     }
@@ -422,7 +416,7 @@
   }
 
   function onPrepared(message) {
-    if (!enabled || !hideMatchedComments) return;
+    if (!enabled) return;
     const note = jevComments.note();
     syncView(note);
     if (message.view !== view || message.noteId !== note.id) return;

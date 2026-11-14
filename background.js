@@ -1,4 +1,4 @@
-import { analyzeComment, analyzeComments, commentState } from "./jev.js";
+import { analyzeComments, commentState } from "./jev.js";
 import { isRedNotePage, manageCommentResponses } from "./comment-responses.js";
 
 const MAX_CONCURRENT = 3;
@@ -68,7 +68,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
         client.view = null;
       }
       sendSettings(client, reset);
-      responses.configure(client, useResponses(client));
+      if (reset) responses.configure(client, useResponses(client));
     }
   });
 });
@@ -82,7 +82,7 @@ function serviceError() {
 }
 
 function useResponses(client) {
-  return clients.has(client) && settings.enabled === true && settings.hideMatchedComments === true && Boolean(settings.apiKey);
+  return clients.has(client) && settings.enabled === true && Boolean(settings.apiKey);
 }
 
 function enqueue(analyze, signal, urgent = false) {
@@ -245,39 +245,23 @@ chrome.runtime.onConnect.addListener(port => {
         client.acks.get(message.delivery)?.(true);
         return;
       }
-      if (message.view !== client.view) return;
-      if (message.type === "analyze-batch" && Array.isArray(message.rows)) {
-        const rows = [];
-        for (const row of message.rows) {
-          if (!Number.isSafeInteger(row?.id)) continue;
-          const state = commentState(row.state);
-          const id = typeof row.commentId === "string" ? row.commentId : row.id;
-          if (state) {
-            rows.push({ id, requestId: row.id, state, deadline: row.deadline });
-          } else {
-            sendDOMResult(client, message.view, row.id, id, { error: "response" });
-          }
-        }
-        const deadline = rows.reduce((earliest, row) => Number.isFinite(row.deadline)
-          ? Math.min(earliest ?? Infinity, row.deadline) : earliest, undefined);
-        const results = analyzeRows(client, rows, client.controller.signal, deadline);
-        rows.forEach(({ id, requestId }, index) => sendDOMResult(client, message.view, requestId, id, results[index]));
-        return;
-      }
-      if (message.type !== "analyze" || !Number.isSafeInteger(message.id)) return;
+      if (message.view !== client.view || message.type !== "analyze-batch" || !Array.isArray(message.rows)) return;
 
-      const state = commentState(message.state);
-      const id = typeof message.commentId === "string" ? message.commentId : null;
-      let result = client.delivered.get(id) ?? client.work.get(id);
-      if (!result) {
-        const { signal } = client.controller;
-        result = state ? enqueue(key => {
-          const timeout = Number.isFinite(message.deadline) ? message.deadline - Date.now() : undefined;
-          return timeout <= 0 ? { error: "timeout" } : analyzeComment(key, state, signal, timeout);
-        }, signal) : { error: "response" };
-        if (state && id) client.work.set(id, result);
+      const rows = [];
+      for (const row of message.rows) {
+        if (!Number.isSafeInteger(row?.id)) continue;
+        const state = commentState(row.state);
+        const id = typeof row.commentId === "string" ? row.commentId : row.id;
+        if (state) {
+          rows.push({ id, requestId: row.id, state, deadline: row.deadline });
+        } else {
+          sendDOMResult(client, message.view, row.id, id, { error: "response" });
+        }
       }
-      sendDOMResult(client, message.view, message.id, id, result);
+      const deadline = rows.reduce((earliest, row) => Number.isFinite(row.deadline)
+        ? Math.min(earliest ?? Infinity, row.deadline) : earliest, undefined);
+      const results = analyzeRows(client, rows, client.controller.signal, deadline);
+      rows.forEach(({ id, requestId }, index) => sendDOMResult(client, message.view, requestId, id, results[index]));
     });
   });
 

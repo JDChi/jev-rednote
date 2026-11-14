@@ -98,6 +98,7 @@ try {
     const url = new URL(route.request().url());
     const slow = url.searchParams.has("slow");
     const reply = url.pathname.endsWith("/sub/page");
+    const folded = url.searchParams.has("folded");
     return route.fulfill({
       headers: { "access-control-allow-origin": site },
       json: {
@@ -107,6 +108,8 @@ try {
           has_more: true,
           comments: slow ? [{ id: url.searchParams.get("slow"), content: "响应超时的推广评论" }] : reply ? [
             { id: "xhr-reply", content: replyOnly }
+          ] : folded ? [
+            { id: "xhr-folded", content: "加我微信领取资料", sub_comments: [{ id: "xhr-folded-child", content: "谢谢" }] }
           ] : [
             { id: "xhr-promo", content: "加我微信领取资料", sub_comments: [{ id: "xhr-child", content: "谢谢" }] },
             { id: "xhr-normal", content: "徒步注意安全" },
@@ -126,17 +129,18 @@ try {
     globalThis.fetch = async (url, request) => {
       const payload = JSON.parse(request.body);
       const { state, questions } = payload;
+      const comments = state.comments;
       const auth = request.headers.Authorization;
       mock.calls.push({ url, state, questions });
       mock.active += 1;
       mock.peak = Math.max(mock.peak, mock.active);
       try {
-        if (state.comment === pendingPromotion) {
+        if (comments.some(row => row.comment === pendingPromotion)) {
           await new Promise(resolve => { mock.finishPending = resolve; });
         } else {
           const slow = "响应超时的推广评论";
-          const delay = state.comment === slow || state.comments?.some(row => row.comment === slow) ? 2300 :
-            state.comment === "旧笔记迟到结果" ? 700 : 85;
+          const delay = comments.some(row => row.comment === slow) ? 2300 :
+            comments.some(row => row.comment === "旧笔记迟到结果") ? 700 : 85;
           await new Promise(resolve => setTimeout(resolve, delay));
         }
         if (auth === "Bearer mock-invalid") return new Response(null, { status: 401 });
@@ -144,8 +148,8 @@ try {
         if (auth === "Bearer mock-malformed") return Response.json({ answers: {} });
 
         const answers = {};
-        for (const { index, comment } of state.comments ?? [state]) {
-          const prefix = index === undefined ? "" : `comment_${index}_`;
+        for (const { index, comment } of comments) {
+          const prefix = `comment_${index}_`;
           const promotion = comment === "我朋友就做这个，有需要来找我" ? 0.75 :
             ["加我微信领取资料", "旧笔记迟到结果", pendingPromotion, "响应超时的推广评论"].includes(comment) ? 0.95 : 0.10;
           const diandianRequest = ["@点点 帮我总结一下", `@点点 ${recommendation}`, subscription, replyOnly]
@@ -161,7 +165,7 @@ try {
   }, { recommendation, pendingPromotion, subscription, replyOnly });
   const waitForRequest = (comment, idle = false) => worker.evaluate(async ({ comment, idle }) => {
     const deadline = Date.now() + 5000;
-    while (!mock.calls.some(call => call.state.comment === comment) || (idle && mock.active)) {
+    while (!mock.calls.some(call => call.state.comments.some(row => row.comment === comment)) || (idle && mock.active)) {
       if (Date.now() > deadline) throw new Error("Expected request did not settle: " + comment);
       await new Promise(resolve => setTimeout(resolve, 10));
     }
@@ -210,7 +214,7 @@ try {
   assert.equal(await page.getByRole("button", { name: "展开更多回复" }).isVisible(), false);
   assert.equal(await page.locator("#comment-normal .jev-rednote-label").count(), 0);
   assert.equal(await page.locator("#comment-mention .jev-rednote-label").count(), 0);
-  assert.equal(await worker.evaluate(() => mock.peak), 3);
+  assert.equal(await worker.evaluate(() => mock.peak), 2);
 
   const subscribe = page.locator("#comment-subscribe");
   const subscriptionReply = page.locator("#comment-subscription-reply");
@@ -247,9 +251,9 @@ try {
   }
   assert.ok(logs.every(line => !/mock-valid|加我微信领取资料|徒步攻略/.test(line)));
   const calls = await worker.evaluate(() => mock.calls);
-  assert.ok(calls.every(call => ![
+  assert.ok(calls.flatMap(call => call.state.comments).every(row => ![
     newReplyText, "回复 阿洛：广州天河那家，199 元。", "@点点 帮我总结一下", `@点点 ${recommendation}`
-  ].includes(call.state.comment) && !call.state.parentComment));
+  ].includes(row.comment) && !row.parentComment));
 
   const summary = page.locator("#comment-summary");
   await promoCollapse.click();
@@ -408,6 +412,9 @@ try {
         hasMore: data.has_more,
         elapsed: performance.now() - start,
         visible: Object.fromEntries(data.comments.map(({ id }) => [id, Boolean(document.getElementById(`comment-${id}`).getClientRects().length)])),
+        folded: Boolean(document.querySelector("#comment-xhr-folded .jev-rednote-toggle")),
+        foldedBodyVisible: Boolean(document.querySelector("#comment-xhr-folded .content")?.getClientRects().length),
+        foldedChildVisible: Boolean(document.querySelector("#comment-xhr-folded-child")?.getClientRects().length),
         childVisible: Boolean(document.querySelector("#comment-xhr-child")?.getClientRects().length),
         suspectLabeled: Boolean(document.querySelector("#comment-xhr-suspect .jev-rednote-label"))
       }));
@@ -449,10 +456,16 @@ try {
   await save.click();
   await page.locator("#comment-xhr-promo").getByRole("button", { name: "已折叠 · 推广引流 · 展开" }).waitFor();
   assert.equal(await page.locator(".jev-rednote-hidden").count(), 0);
+  const folded = await renderXHR(`${commentsAPI}/page?${query}&folded=1`);
+  assert.equal(folded.visible["xhr-folded"], true);
+  assert.equal(folded.folded, true, "promotion must be folded on the first animation frame");
+  assert.equal(folded.foldedBodyVisible, false);
+  assert.equal(folded.foldedChildVisible, false);
+  assert.ok(responseLogs.some(line => line.includes("判断完成 1/1 条")));
   await hide.check();
   await save.click();
   await page.locator("#comment-xhr-promo").waitFor({ state: "hidden" });
-  assert.equal(await worker.evaluate(() => mock.calls.length), beforeXHR + 3);
+  assert.equal(await worker.evaluate(() => mock.calls.length), beforeXHR + 4);
 
   const rawXHR = url => page.evaluate(url => new Promise((resolve, reject) => {
     const start = performance.now();
@@ -464,7 +477,7 @@ try {
   }), url);
   await rawXHR(`${commentsAPI}/page_extra?${query}`);
   await rawXHR(`${commentsAPI}/page?note_id=${noteA.split("/").at(-1)}`);
-  assert.equal(await worker.evaluate(() => mock.calls.length), beforeXHR + 3);
+  assert.equal(await worker.evaluate(() => mock.calls.length), beforeXHR + 4);
 
   const switching = rawXHR(`${commentsAPI}/page?${query}&slow=switched`);
   await worker.evaluate(async count => {
@@ -473,7 +486,7 @@ try {
       if (Date.now() > deadline) throw new Error("Switch test never reached Jev");
       await new Promise(resolve => setTimeout(resolve, 20));
     }
-  }, beforeXHR + 3);
+  }, beforeXHR + 4);
   await page.evaluate(next => history.pushState({}, "", next), noteA);
   assert.ok(await switching < 1500, "switching notes should release the response early");
   await page.locator("#comment-xhr-promo").waitFor({ state: "visible" });
@@ -530,7 +543,7 @@ try {
   assert.equal(await fallback.isVisible(), true);
   assert.equal(await page.locator(".jev-rednote-status").count(), 0);
   assert.ok(logs.some(line => line.includes("部分评论分析超时，原文已保留。")));
-  assert.equal(await worker.evaluate(() => mock.peak), 3);
+  assert.ok(await worker.evaluate(() => mock.peak <= 3));
   assert.deepEqual(errors, []);
   console.log("Chrome MV3 smoke test passed (isolated profile, mocked Jev).");
 } finally {
