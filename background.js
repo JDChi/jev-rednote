@@ -1,5 +1,6 @@
 import { analyzeComments, commentState } from "./jev.js";
 import { isRedNotePage, manageCommentResponses } from "./comment-responses.js";
+import { createScoreCache, scoreCacheKey } from "./score-cache.js";
 
 const MAX_CONCURRENT = 3;
 const clients = new Set();
@@ -14,6 +15,7 @@ const ready = (async () => {
   await chrome.storage.local.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" });
   ({ settings = {} } = await chrome.storage.local.get("settings"));
 })();
+const scoreCache = ready.then(() => createScoreCache(chrome.storage.local));
 
 chrome.action.onClicked.addListener(() => chrome.runtime.openOptionsPage());
 
@@ -148,22 +150,52 @@ function drain() {
   }
 }
 
+async function analyzeFreshRows(noteId, rows, signal, deadline, urgent) {
+  const startedAt = performance.now();
+  const keys = rows.map(({ id }) => scoreCacheKey(noteId, id));
+  const cache = await scoreCache;
+  const cached = await cache.read(keys, deadline);
+  const error = signal.aborted ? "canceled" : deadline <= Date.now() ? "timeout" : null;
+  if (error) return rows.map(() => ({ error }));
+
+  const results = [];
+  const misses = [];
+  rows.forEach((row, index) => {
+    if (cached[index]) results[index] = { scores: cached[index] };
+    else misses.push({ state: row.state, key: keys[index], index });
+  });
+  console.info("[Jev 评论过滤]",
+    `本地缓存 · 命中 ${rows.length - misses.length} · 未命中 ${misses.length} · 查询 ${Math.round(performance.now() - startedAt)}ms`);
+
+  for (let start = 0; start < misses.length; start += 5) {
+    const batch = misses.slice(start, start + 5);
+    const result = enqueue(apiKey => {
+      const timeout = deadline === undefined ? undefined : deadline - Date.now();
+      return timeout <= 0 ? { error: "timeout" } : analyzeComments(apiKey, batch.map(row => row.state), signal, timeout);
+    }, signal, urgent).then(reply => {
+      if (signal.aborted) return { error: "canceled" };
+      if (deadline <= Date.now()) return { error: "timeout" };
+      if (reply.scores) {
+        cache.write(batch.flatMap(({ key }, index) => key ? [{ key, scores: reply.scores[index] }] : []));
+      }
+      return reply;
+    });
+    batch.forEach(({ index }, position) => {
+      results[index] = result.then(({ scores, error }) => scores ? { scores: scores[position] } : { error });
+    });
+  }
+  return results;
+}
+
 function analyzeRows(client, rows, signal, deadline, urgent = false) {
   const missing = new Map();
   for (const row of rows) {
     if (!client.work.has(row.id) && !client.delivered.has(row.id)) missing.set(row.id, row);
   }
   const fresh = [...missing.values()];
-  for (let start = 0; start < fresh.length; start += 5) {
-    const batch = fresh.slice(start, start + 5);
-    const results = enqueue(key => {
-      const timeout = deadline === undefined ? undefined : deadline - Date.now();
-      return timeout <= 0 ? { error: "timeout" } : analyzeComments(key, batch.map(row => row.state), signal, timeout);
-    }, signal, urgent);
-    batch.forEach(({ id }, index) => {
-      const result = results.then(({ scores, error }) => scores ? { scores: scores[index] } : { error });
-      client.work.set(id, result);
-    });
+  if (fresh.length) {
+    const results = analyzeFreshRows(client.noteId, fresh, signal, deadline, urgent);
+    fresh.forEach(({ id }, index) => client.work.set(id, results.then(batch => batch[index])));
   }
   return rows.map(({ id }) => client.delivered.get(id) ?? client.work.get(id));
 }

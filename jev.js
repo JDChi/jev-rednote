@@ -1,6 +1,8 @@
 const ENDPOINT = "https://api.typesafe.ai/v1/systemone";
 const REQUEST_TIMEOUT_MS = 12000;
 
+// Bump when the model or classification instructions change.
+export const SCORE_CACHE_VERSION = 1;
 const QUESTIONS = {
   promotion: {
     type: "noul",
@@ -79,6 +81,8 @@ async function analyze(apiKey, state, questions, signal, timeoutMs = REQUEST_TIM
     }
 
     const data = await response.json();
+    if (signal.aborted) return { error: "canceled" };
+    if (timeout.aborted) return { error: "timeout" };
     const scores = {};
     for (const question of Object.keys(questions)) {
       const answer = data?.answers?.[question];

@@ -68,10 +68,9 @@ const panel = (title, comments) => `
     </div>
   </main>`;
 
-let context;
-try {
+async function launchBrowser() {
   const installedChrome = process.env.JEV_CHROME;
-  context = await chromium.launchPersistentContext(profile, {
+  const context = await chromium.launchPersistentContext(profile, {
     channel: installedChrome ? undefined : "chromium",
     executablePath: installedChrome,
     headless: true,
@@ -92,36 +91,6 @@ try {
     contentType: "text/html; charset=utf-8",
     body: new URL(route.request().url()).pathname === noteA ? panel("徒步攻略", firstComments) : "<main>发现页</main>"
   }));
-  let siteRequests = 0;
-  await context.route(`${commentsAPI}/**`, route => {
-    siteRequests += 1;
-    const url = new URL(route.request().url());
-    const slow = url.searchParams.has("slow");
-    const reply = url.pathname.endsWith("/sub/page");
-    const folded = url.searchParams.has("folded");
-    return route.fulfill({
-      headers: { "access-control-allow-origin": site },
-      json: {
-        success: true,
-        data: {
-          cursor: "keep-cursor",
-          has_more: true,
-          comments: slow ? [{ id: url.searchParams.get("slow"), content: "响应超时的推广评论" }] : reply ? [
-            { id: "xhr-reply", content: replyOnly }
-          ] : folded ? [
-            { id: "xhr-folded", content: "加我微信领取资料", sub_comments: [{ id: "xhr-folded-child", content: "谢谢" }] }
-          ] : [
-            { id: "xhr-promo", content: "加我微信领取资料", sub_comments: [{ id: "xhr-child", content: "谢谢" }] },
-            { id: "xhr-normal", content: "徒步注意安全" },
-            { id: "xhr-suspect", content: "我朋友就做这个，有需要来找我" },
-            ...Array.from({ length: 3 }, (_, i) => ({
-              id: `xhr-keep-${i}`, content: i === 2 ? "响应超时的推广评论" : `正常评论 ${i}`
-            }))
-          ]
-        }
-      }
-    });
-  });
 
   // Mock Jev in the real MV3 worker. No site text or credential leaves the test browser.
   await worker.evaluate(({ recommendation, pendingPromotion, subscription, replyOnly }) => {
@@ -166,6 +135,45 @@ try {
       }
     };
   }, { recommendation, pendingPromotion, subscription, replyOnly });
+  return { context, worker };
+}
+
+let context;
+try {
+  const browser = await launchBrowser();
+  context = browser.context;
+  const { worker } = browser;
+  let siteRequests = 0;
+  await context.route(`${commentsAPI}/**`, route => {
+    siteRequests += 1;
+    const url = new URL(route.request().url());
+    const slow = url.searchParams.has("slow");
+    const reply = url.pathname.endsWith("/sub/page");
+    const folded = url.searchParams.has("folded");
+    const cacheOnly = url.searchParams.has("cache-only");
+    return route.fulfill({
+      headers: { "access-control-allow-origin": site },
+      json: {
+        success: true,
+        data: {
+          cursor: "keep-cursor",
+          has_more: true,
+          comments: slow ? [{ id: url.searchParams.get("slow"), content: "响应超时的推广评论" }] : reply ? [
+            { id: "xhr-reply", content: replyOnly }
+          ] : folded ? [
+            { id: "xhr-folded", content: "加我微信领取资料", sub_comments: [{ id: "xhr-folded-child", content: "谢谢" }] }
+          ] : [
+            { id: "xhr-promo", content: "加我微信领取资料", sub_comments: [{ id: "xhr-child", content: "谢谢" }] },
+            { id: "xhr-normal", content: "徒步注意安全" },
+            { id: "xhr-suspect", content: "我朋友就做这个，有需要来找我" },
+            ...Array.from({ length: cacheOnly ? 0 : 3 }, (_, i) => ({
+              id: `xhr-keep-${i}`, content: i === 2 ? "响应超时的推广评论" : `正常评论 ${i}`
+            }))
+          ]
+        }
+      }
+    });
+  });
   const waitForRequest = (comment, idle = false) => worker.evaluate(async ({ comment, idle }) => {
     const deadline = Date.now() + 5000;
     while (!mock.calls.some(call => call.state.comments.some(row => row.comment === comment)) || (idle && mock.active)) {
@@ -554,6 +562,114 @@ try {
   assert.ok(logs.some(line => line.includes("部分评论分析超时，原文已保留。")));
   assert.ok(await worker.evaluate(() => mock.peak <= 3));
   assert.deepEqual(errors, []);
+
+  const [noteAId, noteBId] = [noteA, noteB].map(path => path.split("/").at(-1));
+  const keyFor = (noteId, id) => JSON.stringify([noteId, id]);
+  const promoKey = keyFor(noteBId, "xhr-promo");
+  const normalKey = keyFor(noteBId, "xhr-normal");
+  const suspectKey = keyFor(noteBId, "xhr-suspect");
+  const expiredKey = keyFor(noteBId, "xhr-folded");
+  const cacheEntries = await worker.evaluate(async keys => {
+    const deadline = Date.now() + 5000;
+    for (;;) {
+      const { commentScoreCache } = await chrome.storage.local.get("commentScoreCache");
+      if (keys.every(key => commentScoreCache?.entries[key])) return commentScoreCache.entries;
+      if (Date.now() > deadline) throw new Error("Comment scores were not persisted");
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
+  }, [promoKey, normalKey, suspectKey, expiredKey, keyFor(noteAId, "normal")]);
+  assert.deepEqual(cacheEntries[normalKey].scores, { promotion: 0.10, diandianRequest: 0.10 });
+  assert.deepEqual(Object.keys(cacheEntries[promoKey]).sort(), ["expiresAt", "scores"]);
+  assert.equal(cacheEntries[keyFor(noteBId, "slow")], undefined, "XHR timeout should not be cached");
+  assert.equal(cacheEntries[keyFor(noteAId, "late")], undefined, "canceled analysis should not be cached");
+  assert.equal(Object.keys(cacheEntries).some(key => JSON.parse(key)[1] === "overlay"), false);
+
+  await page.goto(site + noteA);
+  await page.locator("#comment-promo").waitFor({ state: "hidden" });
+  const callsBeforeReload = await worker.evaluate(() => mock.calls.length);
+  await page.reload();
+  await page.locator("#comment-promo").waitFor({ state: "hidden" });
+  await page.getByText("疑似推广", { exact: true }).waitFor();
+  assert.equal(await worker.evaluate(() => mock.calls.length), callsBeforeReload, "refresh should reuse cached scores");
+
+  await page.goto(site + noteB);
+  await page.locator("main").evaluate((el, html) => { el.outerHTML = html; }, panel("测试响应阶段", ""));
+  await worker.evaluate(async () => {
+    const deadline = Date.now() + 5000;
+    while (!(await chrome.debugger.getTargets()).some(target =>
+      target.url.endsWith("/222222222222222222222222") && target.attached)) {
+      if (Date.now() > deadline) throw new Error("Comment debugger did not reattach");
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
+  });
+  const cachedFrame = await renderXHR(`${commentsAPI}/page?${query}&cache-only=1`);
+  assert.equal(cachedFrame.visible["xhr-promo"], false, "cached promotion must be hidden on the first frame");
+  assert.equal(cachedFrame.visible["xhr-normal"], true);
+  assert.equal(cachedFrame.suspectLabel, "疑似推广");
+  assert.equal(await worker.evaluate(() => mock.calls.length), callsBeforeReload, "reopened note should hit the cache");
+  await page.reload();
+  await page.locator("main").evaluate((el, html) => { el.outerHTML = html; }, panel("测试响应阶段", ""));
+  await worker.evaluate(async () => {
+    const deadline = Date.now() + 5000;
+    while (!(await chrome.debugger.getTargets()).some(target =>
+      target.url.endsWith("/222222222222222222222222") && target.attached)) {
+      if (Date.now() > deadline) throw new Error("Comment debugger did not reattach");
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
+  });
+  const mixedFrame = await renderXHR(`${commentsAPI}/page?${query}`);
+  assert.equal(mixedFrame.visible["xhr-promo"], false, "a slow miss should not prevent a cached hide");
+  assert.equal(mixedFrame.suspectLabel, "疑似推广");
+  assert.equal(mixedFrame.visible["xhr-keep-2"], true);
+  const mixedCalls = await worker.evaluate(start => mock.calls.slice(start), callsBeforeReload);
+  assert.equal(mixedCalls.length, 1);
+  assert.deepEqual(mixedCalls[0].state.comments.map(row => row.comment), ["响应超时的推广评论"]);
+
+  // Seed an expired record in storage and start a new browser process with the same profile.
+  await worker.evaluate(async key => {
+    const { commentScoreCache } = await chrome.storage.local.get("commentScoreCache");
+    commentScoreCache.entries[key].expiresAt = Date.now() - 1;
+    await chrome.storage.local.set({ commentScoreCache });
+  }, expiredKey);
+  await context.close();
+  const restarted = await launchBrowser();
+  context = restarted.context;
+  const reopened = await context.newPage();
+  reopened.setDefaultTimeout(5000);
+  await reopened.goto(site + noteA);
+  await reopened.locator("#comment-promo").waitFor({ state: "hidden" });
+  await reopened.getByText("疑似推广", { exact: true }).waitFor();
+  assert.equal(await restarted.worker.evaluate(() => mock.calls.length), 0, "browser restart should preserve cache hits");
+
+  // These comments were analyzed via XHR. Mount them directly in the DOM on revisit.
+  await reopened.goto(site + noteB);
+  const cacheRows = row("xhr-promo", "同一个评论 ID，正文已更新", "访客") +
+    row("xhr-normal", "徒步注意安全", "访客") + row("xhr-suspect", "我朋友就做这个，有需要来找我", "访客");
+  await reopened.locator("main").evaluate((el, html) => { el.outerHTML = html; }, panel("测试响应阶段", cacheRows));
+  await reopened.locator("#comment-xhr-promo.jev-rednote-hidden").waitFor({ state: "attached" });
+  await reopened.getByText("疑似推广", { exact: true }).waitFor();
+  assert.equal(await reopened.locator("#comment-xhr-normal").isVisible(), true);
+  assert.equal(await restarted.worker.evaluate(() => mock.calls.length), 0, "DOM should reuse scores saved from XHR");
+
+  const restartedOptions = await context.newPage();
+  await restartedOptions.goto(new URL("/options.html", restarted.worker.url()).href);
+  await restartedOptions.getByRole("checkbox", { name: "隐藏整条命中评论" }).uncheck();
+  await restartedOptions.getByRole("button", { name: "保存设置" }).click();
+  await reopened.locator("#comment-xhr-promo").getByRole("button", { name: "已折叠 · 推广引流 · 展开" }).waitFor();
+  assert.equal(await restarted.worker.evaluate(() => mock.calls.length), 0, "display settings should reuse the same scores");
+  const pruned = await restarted.worker.evaluate(async key => {
+    const deadline = Date.now() + 5000;
+    while ((await chrome.storage.local.get("commentScoreCache")).commentScoreCache.entries[key]) {
+      if (Date.now() > deadline) return false;
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
+    return true;
+  }, expiredKey);
+  assert.equal(pruned, true, "expired cache should be removed on startup");
+  await reopened.locator(".list-container").evaluate((el, html) => el.insertAdjacentHTML("beforeend", html),
+    row("xhr-folded", "加我微信领取资料", "访客"));
+  await reopened.locator("#comment-xhr-folded").getByRole("button", { name: "已折叠 · 推广引流 · 展开" }).waitFor();
+  assert.equal(await restarted.worker.evaluate(() => mock.calls.length), 1, "expired scores should be analyzed again");
   console.log("Chrome MV3 smoke test passed (isolated profile, mocked Jev).");
 } finally {
   await context?.close();

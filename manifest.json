@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "小红书评论过滤 · Jev",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "识别小红书网页版评论中的推广引流和点点互动请求。",
   "minimum_chrome_version": "103",
   "icons": {

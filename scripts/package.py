@@ -12,6 +12,7 @@ EXTENSION_FILES = (
     "background.js",
     "comment-responses.js",
     "jev.js",
+    "score-cache.js",
     "comments.js",
     "content.js",
     "content.css",
