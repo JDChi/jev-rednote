@@ -4,7 +4,7 @@
 
 <h1 align="center">小红书评论过滤 · Jev</h1>
 
-<p align="center">打开小红书网页版笔记后，自动识别评论里的推广引流和 @点点 请求。高分评论可以折叠，也可以整条隐藏。</p>
+<p align="center">打开小红书网页版笔记后，自动识别评论里的推广引流和 @点点 请求。疑似评论会加上标签，高分评论可以折叠或整条隐藏。</p>
 
 <p align="center">
   <a href="https://github.com/JDChi/jev-rednote/releases/latest"><strong>下载扩展</strong></a>
@@ -16,6 +16,12 @@
 
 ## 效果展示
 
+<p align="center"><strong>疑似推广 · 保留评论原文</strong></p>
+
+<p align="center">
+  <a href="docs/images/comments-suspected-promotion.png"><img src="docs/images/comments-suspected-promotion.png" width="100%" alt="小红书评论区中，一条评论上方显示黄色的疑似推广标签，原文和回复仍可阅读"></a>
+</p>
+
 <p align="center"><strong>左图 · 评论与回复展开时</strong>　｜　<strong>右图 · 整串折叠后</strong></p>
 
 <p align="center">
@@ -25,9 +31,9 @@
 
 ## 功能
 
+- **标记疑似评论。** 在评论原文上方显示「疑似推广」或「疑似点点互动请求」标签，正文和回复仍可直接阅读。
 - **默认折叠。** 高分命中的评论会折叠正文。主评论折叠时会一并收起整串回复，点「展开」即可查看。
 - **整条隐藏。** 开启后，高分命中的主评论连同整串回复一起隐藏。
-- **疑似标签。** 可疑评论保留原文，并标为「疑似推广」或「疑似点点互动请求」。
 
 ## 安装与配置
 
