@@ -90,16 +90,22 @@ test("batches named answers while keeping each comment's parent context", async 
       ]
     });
     assert.match(body.questions.comment_1_promotion.instructions, /index 为 1/);
-    return Response.json({ answers: {
-      comment_1_diandianRequest: { type: "noul", noul: 0.98 },
-      comment_0_promotion: { type: "noul", noul: 0.96 },
-      comment_1_promotion: { type: "noul", noul: 0.03 },
-      comment_0_diandianRequest: { type: "noul", noul: 0.01 }
-    } });
+    return Response.json({
+      model: "jev-test",
+      usage: { input_tokens: 749, output_tokens: 20 },
+      answers: {
+        comment_1_diandianRequest: { type: "noul", noul: 0.98 },
+        comment_0_promotion: { type: "noul", noul: 0.96 },
+        comment_1_promotion: { type: "noul", noul: 0.03 },
+        comment_0_diandianRequest: { type: "noul", noul: 0.01 }
+      }
+    });
   });
   assert.deepEqual(await analyzeComments("sample", [state, {
     noteTitle: state.noteTitle, comment: "@点点 帮我总结"
   }], controller.signal), {
-    scores: [{ promotion: 0.96, diandianRequest: 0.01 }, { promotion: 0.03, diandianRequest: 0.98 }]
+    scores: [{ promotion: 0.96, diandianRequest: 0.01 }, { promotion: 0.03, diandianRequest: 0.98 }],
+    model: "jev-test",
+    inputTokens: 749
   });
 });

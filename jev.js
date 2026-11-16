@@ -33,17 +33,21 @@ export async function analyzeComment(apiKey, state, signal, timeoutMs = REQUEST_
   return analyze(apiKey, state, QUESTIONS, signal, timeoutMs);
 }
 
-export async function analyzeComments(apiKey, states, signal, timeoutMs = REQUEST_TIMEOUT_MS) {
+export function productionQuestions(index) {
+  return Object.fromEntries(Object.entries(QUESTIONS).map(([key, question]) => [key, {
+    ...question,
+    instructions: `只评估 state.comments 中 index 为 ${index} 的那一项，parentComment 也取该项。\n${question.instructions}`
+  }]));
+}
+
+export async function analyzeComments(apiKey, states, signal, timeoutMs = REQUEST_TIMEOUT_MS, questionSet = productionQuestions) {
   const comments = states.map(({ noteTitle, ...comment }, index) => ({ index, ...comment }));
   const questions = Object.fromEntries(comments.flatMap(({ index }) =>
-    Object.entries(QUESTIONS).map(([key, question]) => [`comment_${index}_${key}`, {
-      ...question,
-      instructions: `只评估 state.comments 中 index 为 ${index} 的那一项，parentComment 也取该项。\n${question.instructions}`
-    }])
+    Object.entries(questionSet(index)).map(([key, question]) => [`comment_${index}_${key}`, question])
   ));
   const result = await analyze(apiKey, { noteTitle: states[0].noteTitle, comments }, questions, signal, timeoutMs);
   if (!result.scores) return result;
-  return { scores: comments.map(({ index }) => Object.fromEntries(
+  return { ...result, scores: comments.map(({ index }) => Object.fromEntries(
     Object.keys(QUESTIONS).map(key => [key, result.scores[`comment_${index}_${key}`]])
   )) };
 }
@@ -83,16 +87,21 @@ async function analyze(apiKey, state, questions, signal, timeoutMs = REQUEST_TIM
     const data = await response.json();
     if (signal.aborted) return { error: "canceled" };
     if (timeout.aborted) return { error: "timeout" };
+    const metadata = {};
+    if (typeof data?.model === "string") metadata.model = data.model;
+    if (Number.isSafeInteger(data?.usage?.input_tokens) && data.usage.input_tokens >= 0) {
+      metadata.inputTokens = data.usage.input_tokens;
+    }
     const scores = {};
     for (const question of Object.keys(questions)) {
       const answer = data?.answers?.[question];
       if (answer?.type !== "noul" || !Number.isFinite(answer.noul) ||
           answer.noul < 0 || answer.noul > 1) {
-        return { error: "response" };
+        return { ...metadata, error: "response" };
       }
       scores[question] = answer.noul;
     }
-    return { scores };
+    return { ...metadata, scores };
   } catch (error) {
     if (signal.aborted) return { error: "canceled" };
     if (timeout.aborted) return { error: "timeout" };
